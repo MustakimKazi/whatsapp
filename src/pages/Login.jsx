@@ -64,17 +64,23 @@ const authStyles = {
 const Login = () => {
   const [formData, setFormData] = useState({ email: "", password: "" });
   const navigate = useNavigate();
-
- const handleLogin = async () => {
+const handleLogin = async () => {
   try {
-    const res = await axios.post('http://localhost:5000/api/login', formData);
+    const res = await axios.post(
+      'https://whatsapp-60un.onrender.com/api/login',
+      formData,
+      {
+        withCredentials: true, // optional, only needed if using cookies/session
+      }
+    );
     localStorage.setItem("user", JSON.stringify(res.data.user));
-    console.log("Login success"); // ✅ Add this
+    console.log("Login success");
     navigate("/chat");
   } catch (err) {
     alert(err.response?.data?.error || "Login failed");
   }
 };
+
 
   return (
     <div style={authStyles.wrapper}>

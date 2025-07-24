@@ -62,16 +62,20 @@ const authStyles = {
 const SignUp = () => {
   const [formData, setFormData] = useState({ username: "", email: "", password: "" });
   const navigate = useNavigate();
+const BASE_URL = 'https://whatsapp-60un.onrender.com';
 
-  const handleSignUp = async () => {
-    try {
-    await axios.post('http://localhost:5000/api/sign_up', formData);
-      alert("Signup successful! Please login.");
-      navigate("/");
-    } catch (err) {
-      alert(err.response?.data?.error || "Signup failed");
-    }
-  };
+ const handleSignUp = async () => {
+  try {
+    await axios.post('https://whatsapp-60un.onrender.com/api/sign_up', formData, {
+      withCredentials: true, // 👈 optional if your backend uses credentials
+    });
+    alert("Signup successful! Please login.");
+    navigate("/");
+  } catch (err) {
+    alert(err.response?.data?.error || "Signup failed");
+  }
+};
+
 
   return (
     <div style={authStyles.wrapper}>

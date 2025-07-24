@@ -18,7 +18,9 @@ const wss = new WebSocket.Server({ server });
 const allowedOrigins = [
   'http://localhost:5173',
   'https://whatsapp-n8xf.vercel.app',
+  'https://whatsapp-60un.onrender.com',
 ];
+
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -124,6 +126,7 @@ app.get('/api/messages/:room', async (req, res) => {
 
   const roomMessages = messages.filter((m) => m.room === req.params.room);
   res.json(roomMessages);
+  res.send('✅ WhatsApp Node backend is live');
 });
 
 const getOnlineUsers = async () => {
