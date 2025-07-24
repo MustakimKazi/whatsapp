@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const http = require('http');
@@ -14,15 +15,25 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://whatsapp-n8xf.vercel.app',
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
+
 app.use(bodyParser.json());
 
-const pool = mysql.createPool({
-  host: 'localhost',
-  user: 'root',
-  password: 'Mustakimkazi@1',
-  database: 'Whatsapp',
-});
+const pool = require('./db');
 
 const rooms = ['general', 'random', 'help'];
 let messages = [];
@@ -48,7 +59,9 @@ app.use('/uploads', express.static(UPLOAD_DIR));
 app.post('/api/upload', upload.single('file'), (req, res) => {
   const file = req.file;
   if (!file) return res.status(400).json({ error: 'No file uploaded' });
-  const fileUrl = `http://localhost:${PORT}/uploads/${file.filename}`;
+
+  const baseUrl = req.protocol + '://' + req.get('host');
+  const fileUrl = `${baseUrl}/uploads/${file.filename}`;
   res.json({ url: fileUrl });
 });
 
@@ -113,7 +126,6 @@ app.get('/api/messages/:room', async (req, res) => {
   res.json(roomMessages);
 });
 
-// === GET ONLINE USERS ===
 const getOnlineUsers = async () => {
   const [rows] = await pool.query('SELECT username FROM users WHERE status = "online"');
   return rows;
@@ -198,8 +210,5 @@ function broadcastAll(data) {
   });
 }
 
-// === SERVER START ===
-const PORT = 5000;
-server.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-});
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
