@@ -12,7 +12,6 @@ const fs = require('fs');
 const { MongoClient } = require('mongodb');
 
 // === MongoDB Connection ===
-// Use your exact connection string that works in Compass
 const uri = "mongodb+srv://mohdmustakimkazi_db_user:HugPu2kIqGxOdhNF@whatsapp.dzac4go.mongodb.net/?retryWrites=true&w=majority&appName=whatsapp";
 
 console.log('🔗 Connecting to MongoDB...');
@@ -30,12 +29,11 @@ async function connectDB() {
   
   try {
     await client.connect();
-    db = client.db('whatsapp'); // Your database name
+    db = client.db('whatsapp');
     isConnected = true;
     
     console.log('✅ Connected to MongoDB Atlas - WhatsApp Database');
     
-    // Check existing data
     const users = db.collection('users');
     const userCount = await users.countDocuments();
     console.log(`📊 Found ${userCount} existing users in database`);
@@ -50,6 +48,9 @@ async function connectDB() {
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
+
+// Store active connections
+const activeConnections = new Map(); // username -> WebSocket
 
 // CORS setup
 app.use(cors({
@@ -76,14 +77,55 @@ function generateToken() {
   return uuid.v4();
 }
 
+// Broadcast user status to all connected clients
+function broadcastUserStatus() {
+  const statusMessage = {
+    type: 'userStatusUpdate',
+    timestamp: new Date().toISOString()
+  };
+  
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(statusMessage));
+    }
+  });
+}
+
+// Update user status in database
+async function updateUserStatus(username, status, lastSeen = null) {
+  try {
+    const db = await connectDB();
+    if (!db) return;
+
+    const users = db.collection('users');
+    const updateData = { status };
+    
+    if (lastSeen) {
+      updateData.lastSeen = lastSeen;
+    }
+    
+    await users.updateOne(
+      { username }, 
+      { $set: updateData }
+    );
+    
+    console.log(`👤 ${username} is now ${status}`);
+  } catch (err) {
+    console.error('Error updating user status:', err);
+  }
+}
+
 // === Routes ===
 
 // Health check
 app.get('/api/health', async (req, res) => {
   const db = await connectDB();
+  const onlineCount = activeConnections.size;
+  
   res.json({ 
     status: db ? 'Connected' : 'Disconnected',
     database: 'whatsapp',
+    onlineUsers: onlineCount,
     timestamp: new Date().toISOString()
   });
 });
@@ -95,7 +137,7 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
   res.json({ url: fileUrl });
 });
 
-// === SIGNUP (Fixed for your existing data) ===
+// === SIGNUP ===
 app.post('/api/sign_up', async (req, res) => {
   const { email, username, password } = req.body;
   
@@ -109,20 +151,19 @@ app.post('/api/sign_up', async (req, res) => {
 
     const users = db.collection('users');
 
-    // Check if email already exists
     if (await users.findOne({ email })) {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    // Hash password (unlike your existing plain text passwords)
     const password_hash = await bcrypt.hash(password, 10);
     
     await users.insertOne({ 
       email, 
       username, 
-      password_hash,  // ✅ Secure hashed password
+      password_hash,
       token: null, 
       status: "offline",
+      lastSeen: new Date().toISOString(),
       createdAt: new Date().toISOString()
     });
 
@@ -134,7 +175,7 @@ app.post('/api/sign_up', async (req, res) => {
   }
 });
 
-// === LOGIN (Works with your existing users) ===
+// === LOGIN ===
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -153,22 +194,19 @@ app.post('/api/login', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check password - handle both hashed and plain text (for existing users)
+    // Check password - handle both hashed and plain text
     let isPasswordValid = false;
     
     if (user.password_hash) {
-      // New users with hashed passwords
       isPasswordValid = await bcrypt.compare(password, user.password_hash);
     } else if (user.password_ba81d) {
-      // Existing users with plain text passwords (from your screenshot)
       isPasswordValid = (password === user.password_ba81d);
       
-      // Auto-upgrade to hashed password
       if (isPasswordValid) {
         const password_hash = await bcrypt.hash(password, 10);
         await users.updateOne({ email }, { 
           $set: { password_hash },
-          $unset: { password_ba81d: "" } // Remove plain text password
+          $unset: { password_ba81d: "" }
         });
       }
     }
@@ -191,7 +229,8 @@ app.post('/api/login', async (req, res) => {
       user: { 
         email: user.email, 
         username: user.username, 
-        token 
+        token,
+        status: "online"
       } 
     });
   } catch (err) {
@@ -200,7 +239,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// === GET ALL USERS ===
+// === GET ALL USERS (with online status) ===
 app.get('/api/users', async (req, res) => {
   try {
     const db = await connectDB();
@@ -208,14 +247,45 @@ app.get('/api/users', async (req, res) => {
 
     const users = db.collection('users');
     const allUsers = await users.find({})
-      .project({ password_hash: 0, password_ba81d: 0, token: 0 }) // Hide sensitive data
+      .project({ password_hash: 0, password_ba81d: 0, token: 0 })
       .sort({ username: 1 })
       .toArray();
     
-    res.json(allUsers);
+    // Enhance with real-time online status from active connections
+    const usersWithRealTimeStatus = allUsers.map(user => ({
+      ...user,
+      // User is actually online if they have an active WebSocket connection
+      isOnline: activeConnections.has(user.username),
+      // Use real-time status if online, otherwise use database status
+      status: activeConnections.has(user.username) ? 'online' : user.status
+    }));
+    
+    res.json(usersWithRealTimeStatus);
   } catch (err) {
     console.error('Get users error:', err);
     res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// === GET ONLINE USERS COUNT ===
+app.get('/api/online-users', async (req, res) => {
+  try {
+    const db = await connectDB();
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+    const users = db.collection('users');
+    const onlineUsers = await users.find({ status: 'online' })
+      .project({ username: 1, lastSeen: 1 })
+      .toArray();
+
+    res.json({
+      onlineCount: activeConnections.size,
+      activeUsers: Array.from(activeConnections.keys()),
+      databaseOnlineUsers: onlineUsers
+    });
+  } catch (err) {
+    console.error('Get online users error:', err);
+    res.status(500).json({ error: 'Failed to fetch online users' });
   }
 });
 
@@ -263,7 +333,25 @@ wss.on('connection', (ws) => {
           const user = await users.findOne({ token: message.token });
           if (user) {
             ws.user = user;
-            ws.send(JSON.stringify({ type: 'authSuccess', user: { username: user.username } }));
+            
+            // Add to active connections
+            activeConnections.set(user.username, ws);
+            
+            // Update user status to online
+            await updateUserStatus(user.username, 'online');
+            
+            // Broadcast status update to all clients
+            broadcastUserStatus();
+            
+            ws.send(JSON.stringify({ 
+              type: 'authSuccess', 
+              user: { 
+                username: user.username,
+                status: 'online'
+              } 
+            }));
+            
+            console.log(`✅ ${user.username} authenticated via WebSocket`);
           }
         }
       }
@@ -292,10 +380,89 @@ wss.on('connection', (ws) => {
           }
         });
       }
+      
+      // Handle typing indicators
+      if (message.type === 'typing' && ws.user) {
+        wss.clients.forEach(client => {
+          if (client !== ws && client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'typing',
+              user: ws.user.username,
+              isTyping: message.isTyping,
+              room: message.room
+            }));
+          }
+        });
+      }
+      
     } catch (err) {
       console.error('WebSocket error:', err);
     }
   });
+
+  // Handle connection close
+  ws.on('close', async () => {
+    if (ws.user) {
+      const username = ws.user.username;
+      
+      // Remove from active connections
+      activeConnections.delete(username);
+      
+      // Update user status to offline with last seen timestamp
+      const lastSeen = new Date().toISOString();
+      await updateUserStatus(username, 'offline', lastSeen);
+      
+      // Broadcast status update to all clients
+      broadcastUserStatus();
+      
+      console.log(`❌ ${username} disconnected. Last seen: ${lastSeen}`);
+    }
+  });
+
+  // Handle connection errors
+  ws.on('error', (error) => {
+    console.error('WebSocket error:', error);
+  });
+});
+
+// Clean up inactive connections periodically
+setInterval(() => {
+  const now = Date.now();
+  wss.clients.forEach(client => {
+    // You can add ping/pong logic here for more accurate connection tracking
+    if (client.isAlive === false) {
+      return client.terminate();
+    }
+    client.isAlive = false;
+    client.ping(() => {});
+  });
+}, 30000);
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🔄 Shutting down server...');
+  
+  // Update all online users to offline
+  try {
+    const db = await connectDB();
+    if (db) {
+      const users = db.collection('users');
+      await users.updateMany(
+        { status: 'online' }, 
+        { 
+          $set: { 
+            status: 'offline',
+            lastSeen: new Date().toISOString()
+          } 
+        }
+      );
+      console.log('✅ All users set to offline');
+    }
+  } catch (err) {
+    console.error('Error during shutdown:', err);
+  }
+  
+  process.exit(0);
 });
 
 // === START SERVER ===
@@ -304,15 +471,27 @@ server.listen(PORT, async () => {
   console.log('='.repeat(50));
   console.log(`✅ WhatsApp Server running on port ${PORT}`);
   
-  // Test connection
   const db = await connectDB();
   if (db) {
     console.log('✅ Connected to your existing WhatsApp database');
-    console.log('✅ Existing users can login with their current passwords');
+    
+    // Initialize all users as offline on server start
+    const users = db.collection('users');
+    await users.updateMany(
+      { status: 'online' }, 
+      { 
+        $set: { 
+          status: 'offline',
+          lastSeen: new Date().toISOString()
+        } 
+      }
+    );
+    console.log('✅ All users initialized as offline');
   } else {
     console.log('❌ Database connection failed');
   }
   
   console.log(`✅ Health: http://localhost:${PORT}/api/health`);
+  console.log(`✅ Online users: http://localhost:${PORT}/api/online-users`);
   console.log('='.repeat(50));
 });

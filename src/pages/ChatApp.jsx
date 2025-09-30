@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle } from 'lucide-react';
+import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff } from 'lucide-react';
 import { AuthContext } from '../../AuthContext';
 
 const ChatApp = () => {
@@ -18,6 +18,8 @@ const ChatApp = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [isConnected, setIsConnected] = useState(false);
+  const [onlineUsers, setOnlineUsers] = useState([]);
+  const [lastSeenData, setLastSeenData] = useState({});
 
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
@@ -29,6 +31,43 @@ const ChatApp = () => {
   const BASE_URL = 'https://backend-bl4w.onrender.com';
   const WS_URL = 'wss://backend-bl4w.onrender.com';
 
+  // Format last seen time
+  const formatLastSeen = (timestamp) => {
+    if (!timestamp) return 'Never';
+    
+    const now = new Date();
+    const lastSeen = new Date(timestamp);
+    const diffInMinutes = Math.floor((now - lastSeen) / (1000 * 60));
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    const diffInDays = Math.floor(diffInHours / 24);
+
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInDays < 7) return `${diffInDays}d ago`;
+    
+    return lastSeen.toLocaleDateString();
+  };
+
+  // Enhanced user status calculation
+  const getUserStatus = (userObj) => {
+    // First check if user has active WebSocket connection (real-time)
+    if (onlineUsers.includes(userObj.username)) {
+      return 'online';
+    }
+    
+    // Then check database status
+    if (userObj.status === 'online') {
+      return 'online';
+    }
+    
+    return 'offline';
+  };
+
+  // Count online users
+  const onlineUsersCount = users.filter(u => getUserStatus(u) === 'online').length;
+  const totalUsersCount = users.length;
+
   // Handle resize for mobile layout
   useEffect(() => {
     const handleResize = () => {
@@ -39,6 +78,42 @@ const ChatApp = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  // Load users data periodically
+  useEffect(() => {
+    if (!user) return;
+
+    const loadUsersData = async () => {
+      try {
+        const response = await axios.get(`${BASE_URL}/api/users`, {
+          headers: { Authorization: user.token }
+        });
+        
+        const usersData = response.data || [];
+        setUsers(usersData);
+        
+        // Extract last seen data
+        const lastSeenMap = {};
+        usersData.forEach(userObj => {
+          if (userObj.lastSeen) {
+            lastSeenMap[userObj.username] = userObj.lastSeen;
+          }
+        });
+        setLastSeenData(lastSeenMap);
+        
+      } catch (error) {
+        console.error('Error loading users:', error);
+      }
+    };
+
+    // Load immediately
+    loadUsersData();
+    
+    // Then every 30 seconds
+    const interval = setInterval(loadUsersData, 30000);
+    
+    return () => clearInterval(interval);
+  }, [user]);
 
   // Initial load: auth from context, connect ws, load messages/rooms
   useEffect(() => {
@@ -93,6 +168,9 @@ const ChatApp = () => {
         // Send auth immediately after connection
         ws.current?.send(JSON.stringify({ type: 'auth', token: userObj.token }));
         
+        // Add current user to online users
+        setOnlineUsers(prev => [...new Set([...prev, userObj.username])]);
+        
         // Start ping interval for connection health
         const pingInterval = setInterval(() => {
           if (ws.current?.readyState === WebSocket.OPEN) {
@@ -111,7 +189,8 @@ const ChatApp = () => {
           switch (data.type) {
             case 'authSuccess':
               setRooms(data.rooms || ['general']);
-              setUsers(data.users || []);
+              // Load users after successful auth
+              loadUsersData();
               break;
             case 'message':
               // Append only messages for current room
@@ -120,7 +199,13 @@ const ChatApp = () => {
               }
               break;
             case 'users':
-              setUsers(data.data || []);
+              // Ensure users have status information
+              const updatedUsers = (data.data || []).map(user => ({
+                ...user,
+                status: user.status || 'online',
+                lastSeen: user.lastSeen || null
+              }));
+              setUsers(updatedUsers);
               break;
             case 'typing':
               handleTypingIndicator(data);
@@ -134,8 +219,31 @@ const ChatApp = () => {
             case 'pong':
               // Handle pong response for connection health
               break;
+            case 'userStatusUpdate':
+              // Reload users data when status updates
+              loadUsersData();
+              break;
             case 'connection':
               console.log('🔗 Connection status:', data.message);
+              break;
+            case 'userOnline':
+              // Add user to online list
+              if (data.username) {
+                setOnlineUsers(prev => [...new Set([...prev, data.username])]);
+              }
+              break;
+            case 'userOffline':
+              // Remove user from online list
+              if (data.username) {
+                setOnlineUsers(prev => prev.filter(u => u !== data.username));
+                // Update last seen
+                if (data.lastSeen) {
+                  setLastSeenData(prev => ({
+                    ...prev,
+                    [data.username]: data.lastSeen
+                  }));
+                }
+              }
               break;
             default:
               console.log('Unknown message type:', data.type);
@@ -148,6 +256,11 @@ const ChatApp = () => {
       ws.current.onclose = (ev) => {
         console.log('🔌 WebSocket disconnected', ev);
         setIsConnected(false);
+        
+        // Remove current user from online users
+        if (userObj?.username) {
+          setOnlineUsers(prev => prev.filter(u => u !== userObj.username));
+        }
         
         // Attempt reconnection after 3 seconds
         setTimeout(() => {
@@ -165,6 +278,31 @@ const ChatApp = () => {
     } catch (error) {
       console.error('WebSocket connection failed:', error);
       setIsConnected(false);
+    }
+  };
+
+  const loadUsersData = async () => {
+    if (!user?.token) return;
+    
+    try {
+      const response = await axios.get(`${BASE_URL}/api/users`, {
+        headers: { Authorization: user.token }
+      });
+      
+      const usersData = response.data || [];
+      setUsers(usersData);
+      
+      // Extract last seen data
+      const lastSeenMap = {};
+      usersData.forEach(userObj => {
+        if (userObj.lastSeen) {
+          lastSeenMap[userObj.username] = userObj.lastSeen;
+        }
+      });
+      setLastSeenData(lastSeenMap);
+      
+    } catch (error) {
+      console.error('Error loading users:', error);
     }
   };
 
@@ -533,7 +671,7 @@ const ChatApp = () => {
             </div>
           ))}
 
-          {/* Online Users */}
+          {/* Enhanced Online Users Section */}
           <div
             style={{
               marginTop: '20px',
@@ -553,35 +691,148 @@ const ChatApp = () => {
                 color: isMobile ? '#a0aec0' : '#718096',
                 display: 'flex',
                 alignItems: 'center',
+                justifyContent: 'space-between',
                 gap: '8px',
               }}
             >
-              <Users size={14} />
-              Online ({users.length})
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={14} />
+                Online Users ({onlineUsersCount}/{totalUsersCount})
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                {isConnected ? (
+                  <Wifi size={12} color="#48bb78" />
+                ) : (
+                  <WifiOff size={12} color="#ed8936" />
+                )}
+              </div>
             </h4>
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '8px',
+                gap: '10px',
+                maxHeight: '200px',
+                overflowY: 'auto',
               }}
             >
-              {users.map((userObj, index) => (
-                <div
-                  key={index}
-                  style={{
-                    fontSize: '14px',
-                    color: isMobile ? '#4a5568' : '#cbd5e0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '4px 0',
-                  }}
-                >
-                  <Circle size={8} fill={isMobile ? '#48bb78' : '#48bb78'} color={isMobile ? '#48bb78' : '#48bb78'} />
-                  {userObj.username || userObj.displayName}
+              {users.map((userObj, index) => {
+                const isUserOnline = getUserStatus(userObj) === 'online';
+                const lastSeen = lastSeenData[userObj.username] || userObj.lastSeen;
+                
+                return (
+                  <div
+                    key={index}
+                    style={{
+                      fontSize: '14px',
+                      color: isMobile ? '#4a5568' : '#cbd5e0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '8px',
+                      padding: '6px 0',
+                      borderBottom: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                      <div
+                        style={{
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: isUserOnline 
+                            ? (isMobile ? '#48bb78' : '#48bb78') 
+                            : (isMobile ? '#a0aec0' : '#718096'),
+                          boxShadow: isUserOnline 
+                            ? '0 0 6px rgba(72, 187, 120, 0.6)' 
+                            : 'none',
+                          animation: isUserOnline ? 'pulse 2s infinite' : 'none',
+                        }}
+                      />
+                      <span style={{ 
+                        fontWeight: isUserOnline ? '600' : '400',
+                        color: isUserOnline 
+                          ? (isMobile ? '#2d3748' : '#fff')
+                          : (isMobile ? '#718096' : '#a0aec0')
+                      }}>
+                        {userObj.username || userObj.displayName}
+                        {userObj.username === user.username && ' (You)'}
+                      </span>
+                    </div>
+                    
+                    {!isUserOnline && lastSeen && (
+                      <div style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '4px',
+                        fontSize: '11px',
+                        color: isMobile ? '#a0aec0' : '#718096'
+                      }}>
+                        <Clock size={10} />
+                        <span>{formatLastSeen(lastSeen)}</span>
+                      </div>
+                    )}
+                    
+                    {isUserOnline && (
+                      <div style={{ 
+                        fontSize: '10px',
+                        color: isMobile ? '#48bb78' : '#48bb78',
+                        fontWeight: '600',
+                        padding: '2px 6px',
+                        background: isMobile ? 'rgba(72, 187, 120, 0.1)' : 'rgba(72, 187, 120, 0.2)',
+                        borderRadius: '8px',
+                      }}>
+                        online
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              
+              {users.length === 0 && (
+                <div style={{ 
+                  textAlign: 'center', 
+                  fontSize: '12px', 
+                  color: isMobile ? '#a0aec0' : '#718096',
+                  padding: '10px 0'
+                }}>
+                  No users found
                 </div>
-              ))}
+              )}
+            </div>
+            
+            {/* Connection Status */}
+            <div style={{ 
+              marginTop: '12px',
+              padding: '8px 12px',
+              background: isMobile ? 'rgba(102, 126, 234, 0.1)' : 'rgba(255,255,255,0.05)',
+              borderRadius: '8px',
+              fontSize: '11px',
+              color: isMobile ? '#667eea' : '#a0aec0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <span>Connection Status:</span>
+              <span style={{ 
+                color: isConnected ? '#48bb78' : '#ed8936',
+                fontWeight: '600',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                {isConnected ? (
+                  <>
+                    <Wifi size={10} />
+                    Live
+                  </>
+                ) : (
+                  <>
+                    <WifiOff size={10} />
+                    Connecting...
+                  </>
+                )}
+              </span>
             </div>
           </div>
         </div>
@@ -702,6 +953,21 @@ const ChatApp = () => {
               </span>
               {currentRoom}
             </h2>
+            
+            {/* Online users count in header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '13px',
+              color: isMobile ? '#718096' : '#a0aec0',
+              background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+              padding: '4px 10px',
+              borderRadius: '12px',
+            }}>
+              <Users size={14} />
+              <span>{onlineUsersCount} online</span>
+            </div>
           </div>
 
           <div
@@ -753,9 +1019,10 @@ const ChatApp = () => {
                   borderRadius: '50%',
                   background: isConnected ? '#48bb78' : '#ed8936',
                   boxShadow: isConnected ? '0 0 8px rgba(72, 187, 120, 0.6)' : '0 0 8px rgba(237, 137, 54, 0.6)',
+                  animation: isConnected ? 'pulse 2s infinite' : 'none',
                 }}
               />
-              {isConnected ? 'Online' : 'Connecting'}
+              {isConnected ? 'Connected' : 'Connecting'}
             </div>
           </div>
         </div>
@@ -791,30 +1058,62 @@ const ChatApp = () => {
             messages.map((msg, index) => {
               // Fallback key when id missing
               const key = msg?.id ?? `${index}-${msg?.timestamp ?? ''}`;
+              const isCurrentUser = msg.sender === user?.username;
+              
               return (
                 <div
                   key={key}
                   style={{
                     display: 'flex',
-                    justifyContent: msg.sender === user?.username ? 'flex-end' : 'flex-start',
+                    justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
                     alignItems: 'flex-end',
                     gap: '8px',
                   }}
                 >
+                  {!isCurrentUser && (
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      flexShrink: 0,
+                    }}>
+                      {(msg.senderName || msg.sender || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  
                   <div
                     style={{
                       maxWidth: isMobile ? '85%' : '60%',
-                      background: msg.sender === user?.username ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
-                      color: msg.sender === user?.username ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
+                      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
+                      color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
                       padding: '12px 16px',
-                      borderRadius: msg.sender === user?.username ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                      boxShadow: msg.sender === user?.username ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
+                      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
                       wordBreak: 'break-word',
-                      border: isMobile && msg.sender !== user?.username ? '1px solid #e2e8f0' : 'none',
+                      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
                     }}
                   >
+                    {!isCurrentUser && (
+                      <div style={{ 
+                        fontSize: '12px', 
+                        opacity: 0.8, 
+                        marginBottom: '4px', 
+                        fontWeight: '600',
+                        color: isMobile ? '#667eea' : '#a0aec0'
+                      }}>
+                        {msg.senderName || msg.sender}
+                      </div>
+                    )}
+                    
                     <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {msg.senderName || msg.sender} • {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                     </div>
 
                     {msg.isFile ? (
@@ -822,7 +1121,7 @@ const ChatApp = () => {
                         <div>
                           <img src={msg.content} alt="sent" style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '8px' }} />
                           <div style={{ marginTop: '8px' }}>
-                            <a href={msg.content} download style={{ color: msg.sender === user?.username ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
+                            <a href={msg.content} download style={{ color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
                               Download Image
                             </a>
                           </div>
@@ -833,7 +1132,7 @@ const ChatApp = () => {
                             <source src={msg.content} type="video/mp4" />
                           </video>
                           <div style={{ marginTop: '8px' }}>
-                            <a href={msg.content} download style={{ color: msg.sender === user?.username ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
+                            <a href={msg.content} download style={{ color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
                               Download Video
                             </a>
                           </div>
@@ -843,6 +1142,24 @@ const ChatApp = () => {
                       <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{msg.content}</div>
                     )}
                   </div>
+                  
+                  {isCurrentUser && (
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '50%',
+                      background: 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: '12px',
+                      fontWeight: 'bold',
+                      flexShrink: 0,
+                    }}>
+                      {(user.username || 'U').charAt(0).toUpperCase()}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -862,6 +1179,7 @@ const ChatApp = () => {
           <div ref={messagesEndRef} />
         </div>
 
+        
         {/* Input Area */}
         <div
           style={{
