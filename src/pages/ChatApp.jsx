@@ -1,12 +1,11 @@
-
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle } from 'lucide-react';
+import { AuthContext } from '../../AuthContext';
 
 const ChatApp = () => {
-  const [user, setUser] = useState(null);
+  const { user, logout } = useContext(AuthContext);
   const [messages, setMessages] = useState([]);
   const [users, setUsers] = useState([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -41,31 +40,21 @@ const ChatApp = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Initial load: auth from localStorage, connect ws, load messages/rooms
+  // Initial load: auth from context, connect ws, load messages/rooms
   useEffect(() => {
-    const storedUser = (() => {
-      try {
-        return JSON.parse(localStorage.getItem('user'));
-      } catch {
-        return null;
-      }
-    })();
-
-    if (!storedUser) {
+    if (!user) {
       navigate('/');
       return;
     }
 
-    setUser(storedUser);
-
     if (!hasConnectedRef.current) {
-      connectWebSocket(storedUser);
+      connectWebSocket(user);
       hasConnectedRef.current = true;
     }
 
     // Load messages for the current room
-    loadMessages(currentRoom, storedUser.token);
-    loadRooms(storedUser.token);
+    loadMessages(currentRoom, user.token);
+    loadRooms(user.token);
 
     // Cleanup on unmount: close ws
     return () => {
@@ -77,7 +66,7 @@ const ChatApp = () => {
       clearTimeout(typingTimeoutRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [user, navigate]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -346,12 +335,19 @@ const ChatApp = () => {
     } catch (err) {
       console.error('Logout error:', err);
     }
-    localStorage.removeItem('user');
+    
+    // Use AuthContext logout function
+    logout();
+    
     if (ws.current) {
       ws.current.close();
     }
-    navigate('/');
   };
+
+  // Don't render anything if user is not authenticated
+  if (!user) {
+    return null;
+  }
 
   return (
     <div

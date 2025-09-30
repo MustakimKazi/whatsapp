@@ -1,33 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import SignUp from './pages/SignUp';
-import Login from './pages/Login';
-import ChatApp from './pages/ChatApp';
+import React from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import SignUp from "./pages/SignUp";
+import Login from "./pages/Login";
+import ChatApp from "./pages/ChatApp";
+import { AuthProvider, AuthContext } from "../AuthContext"; // 👈 Fixed path (should be relative to App.jsx)
+
+// Protected Route - for pages that require authentication
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated } = React.useContext(AuthContext);
+  return isAuthenticated ? children : <Navigate to="/" replace />;
+};
+
+// Public Route - for pages that should NOT be accessible when authenticated
+const PublicRoute = ({ children }) => {
+  const { isAuthenticated } = React.useContext(AuthContext);
+  return !isAuthenticated ? children : <Navigate to="/chat" replace />;
+};
 
 const App = () => {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user')));
-
-  // Update user state when localStorage changes (optional)
-  useEffect(() => {
-    const handleStorageChange = () => {
-      setUser(JSON.parse(localStorage.getItem('user')));
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Login onLogin={setUser} />} />
-        <Route path="/sign_up" element={<SignUp onSignUp={setUser} />} />
-        <Route
-          path="/chat"
-          element={user ? <ChatApp /> : <Navigate to="/" replace />}
-        />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route 
+            path="/" 
+            element={
+              <PublicRoute>
+                <Login />
+              </PublicRoute>
+            } 
+          />
+          <Route 
+            path="/sign_up" 
+            element={
+              <PublicRoute>
+                <SignUp />
+              </PublicRoute>
+            } 
+          />
+          <Route
+            path="/chat"
+            element={
+              <ProtectedRoute>
+                <ChatApp />
+              </ProtectedRoute>
+            }
+          />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 };
 

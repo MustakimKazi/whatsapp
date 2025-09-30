@@ -1,7 +1,7 @@
-// Login.jsx
-import React, { useState } from "react";
+import React, { useState, useContext } from "react";
 import axios from "axios";
 import { useNavigate, Link } from "react-router-dom";
+import { AuthContext } from "../../AuthContext"; // Adjust path as needed
 
 const authStyles = {
   wrapper: {
@@ -31,12 +31,13 @@ const authStyles = {
   error: { color: "#ed4245", fontSize: "12px", textAlign: "center", marginTop: "-4px" },
 };
 
-const BASE_URL = "https://backend-bl4w.onrender.com"; // ✅ Updated to Render backend
+const BASE_URL = "https://backend-bl4w.onrender.com";
 
-const Login = ({ onLogin }) => {
+const Login = () => {
+  const { login } = useContext(AuthContext); // Use AuthContext
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(""); // error message
+  const [error, setError] = useState("");
   const navigate = useNavigate();
 
   const handleLogin = async () => {
@@ -49,16 +50,13 @@ const Login = ({ onLogin }) => {
 
     setLoading(true);
     try {
-      const res = await axios.post(`${BASE_URL}/api/login`, formData); // ✅ Use BASE_URL
+      const res = await axios.post(`${BASE_URL}/api/login`, formData);
 
-      // Save user to localStorage
-      localStorage.setItem("user", JSON.stringify(res.data.user));
-
-      // Update App-level state (if provided)
-      if (onLogin) onLogin(res.data.user);
+      // Use AuthContext login function instead of localStorage directly
+      login(res.data.user);
 
       console.log("✅ Login success:", res.data.user);
-      navigate("/chat"); // redirect to chat page
+      navigate("/chat");
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.error || "Login failed");
