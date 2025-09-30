@@ -1,6 +1,9 @@
+
+
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle } from 'lucide-react';
 
 const ChatApp = () => {
   const [user, setUser] = useState(null);
@@ -14,75 +17,118 @@ const ChatApp = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
+  const [isConnected, setIsConnected] = useState(false);
 
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const hasConnectedRef = useRef(false);
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
-  // Use your Render.com backend URL
-  const BASE_URL = "https://backend-bl4w.onrender.com";
-  const WS_URL = "wss://backend-bl4w.onrender.com";
+  const BASE_URL = 'https://backend-bl4w.onrender.com';
+  const WS_URL = 'wss://backend-bl4w.onrender.com';
 
+  // Handle resize for mobile layout
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth <= 768;
       setIsMobile(mobile);
-      if (!mobile) {
-        setSidebarOpen(false);
-      }
+      if (!mobile) setSidebarOpen(false);
     };
-
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Initial load: auth from localStorage, connect ws, load messages/rooms
   useEffect(() => {
-    const storedUser = JSON.parse(localStorage.getItem('user'));
-    if (!storedUser) return navigate('/');
+    const storedUser = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('user'));
+      } catch {
+        return null;
+      }
+    })();
+
+    if (!storedUser) {
+      navigate('/');
+      return;
+    }
+
     setUser(storedUser);
+
     if (!hasConnectedRef.current) {
       connectWebSocket(storedUser);
       hasConnectedRef.current = true;
     }
+
+    // Load messages for the current room
     loadMessages(currentRoom, storedUser.token);
     loadRooms(storedUser.token);
+
+    // Cleanup on unmount: close ws
+    return () => {
+      if (ws.current) {
+        try {
+          ws.current.close();
+        } catch (e) { /* ignore */ }
+      }
+      clearTimeout(typingTimeoutRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Auto-close sidebar on mobile when room changes
+  // Close sidebar on mobile when room changes
   useEffect(() => {
-    if (isMobile) {
-      setSidebarOpen(false);
-    }
+    if (isMobile) setSidebarOpen(false);
   }, [currentRoom, isMobile]);
 
   const connectWebSocket = (userObj) => {
     try {
+      // Close existing connection if any
+      if (ws.current) {
+        ws.current.close();
+      }
+
       ws.current = new WebSocket(WS_URL);
-      
+
       ws.current.onopen = () => {
         console.log('✅ WebSocket connected');
-        ws.current.send(JSON.stringify({ type: 'auth', token: userObj.token }));
+        setIsConnected(true);
+        // Send auth immediately after connection
+        ws.current?.send(JSON.stringify({ type: 'auth', token: userObj.token }));
+        
+        // Start ping interval for connection health
+        const pingInterval = setInterval(() => {
+          if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({ type: 'ping' }));
+          } else {
+            clearInterval(pingInterval);
+          }
+        }, 25000); // Ping every 25 seconds
       };
 
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           console.log('📨 WebSocket message:', data);
-          
+
           switch (data.type) {
             case 'authSuccess':
               setRooms(data.rooms || ['general']);
               setUsers(data.users || []);
               break;
             case 'message':
-              setMessages((prev) => [...prev, data.data]);
+              // Append only messages for current room
+              if (!data.data.room || data.data.room === currentRoom) {
+                setMessages((prev) => [...prev, data.data]);
+              }
               break;
             case 'users':
               setUsers(data.data || []);
@@ -96,6 +142,12 @@ const ChatApp = () => {
                 setShowDeleteConfirm(false);
               }
               break;
+            case 'pong':
+              // Handle pong response for connection health
+              break;
+            case 'connection':
+              console.log('🔗 Connection status:', data.message);
+              break;
             default:
               console.log('Unknown message type:', data.type);
           }
@@ -104,27 +156,38 @@ const ChatApp = () => {
         }
       };
 
-      ws.current.onclose = () => {
-        console.log('🔌 WebSocket disconnected');
+      ws.current.onclose = (ev) => {
+        console.log('🔌 WebSocket disconnected', ev);
+        setIsConnected(false);
+        
+        // Attempt reconnection after 3 seconds
+        setTimeout(() => {
+          if (user) {
+            console.log('🔄 Attempting to reconnect...');
+            connectWebSocket(user);
+          }
+        }, 3000);
       };
 
       ws.current.onerror = (error) => {
         console.error('WebSocket error:', error);
+        setIsConnected(false);
       };
-
     } catch (error) {
       console.error('WebSocket connection failed:', error);
+      setIsConnected(false);
     }
   };
 
   const loadMessages = async (room, token) => {
+    if (!token) return;
     try {
       console.log(`📥 Loading messages for room: ${room}`);
       const res = await axios.get(`${BASE_URL}/api/messages/${room}`, {
         headers: { Authorization: token },
       });
-      console.log('📨 Messages loaded:', res.data.messages?.length || 0);
       setMessages(res.data.messages || []);
+      console.log('📨 Messages loaded:', (res.data.messages || []).length);
     } catch (err) {
       console.error('❌ Error loading messages:', err);
       setMessages([]);
@@ -132,6 +195,7 @@ const ChatApp = () => {
   };
 
   const loadRooms = async (token) => {
+    if (!token) return;
     try {
       const res = await axios.get(`${BASE_URL}/api/rooms`, {
         headers: { Authorization: token },
@@ -153,8 +217,8 @@ const ChatApp = () => {
       return;
     }
 
+    // Handle file upload
     if (file) {
-      // Handle file upload
       const formData = new FormData();
       formData.append('file', file);
       try {
@@ -163,43 +227,45 @@ const ChatApp = () => {
         });
         const fileUrl = res.data.url;
         const fileType = file.type.startsWith('video') ? 'video' : 'image';
-        
-        ws.current.send(JSON.stringify({ 
-          type: 'message', 
-          content: fileUrl, 
-          room: currentRoom, 
-          isFile: true, 
-          fileType 
-        }));
+
+        ws.current.send(
+          JSON.stringify({
+            type: 'message',
+            content: fileUrl,
+            room: currentRoom,
+            isFile: true,
+            fileType,
+          })
+        );
       } catch (error) {
         console.error('❌ Upload failed', error);
         alert('File upload failed');
+      } finally {
+        setFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        setInputMessage('');
       }
-      setFile(null);
-      setInputMessage('');
       return;
     }
 
-    // Handle text message
+    // Handle plain text message
     if (inputMessage.trim()) {
       console.log('📤 Sending message:', inputMessage);
-      ws.current.send(JSON.stringify({ 
-        type: 'message', 
-        content: inputMessage, 
-        room: currentRoom 
-      }));
+      ws.current.send(
+        JSON.stringify({
+          type: 'message',
+          content: inputMessage,
+          room: currentRoom,
+        })
+      );
       setInputMessage('');
     }
 
     // Stop typing indicator
     setIsTyping(false);
     clearTimeout(typingTimeoutRef.current);
-    if (ws.current.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ 
-        type: 'typing', 
-        typing: false, 
-        room: currentRoom 
-      }));
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'typing', typing: false, room: currentRoom }));
     }
   };
 
@@ -233,12 +299,13 @@ const ChatApp = () => {
   };
 
   const handleTypingIndicator = (data) => {
-    if (data.username !== user?.username) {
-      if (data.typing && !typingUsers.includes(data.username)) {
-        setTypingUsers((prev) => [...prev, data.username]);
-      } else if (!data.typing) {
-        setTypingUsers((prev) => prev.filter((u) => u !== data.username));
-      }
+    if (!user) return;
+    if (data.username === user.username) return; // Ignore own typing
+
+    if (data.typing && !typingUsers.includes(data.username)) {
+      setTypingUsers((prev) => [...prev, data.username]);
+    } else if (!data.typing) {
+      setTypingUsers((prev) => prev.filter((u) => u !== data.username));
     }
   };
 
@@ -286,502 +353,708 @@ const ChatApp = () => {
     navigate('/');
   };
 
-  // 🌟 Responsive Chat Styles
-  const layoutStyles = {
-    container: { 
-      display: 'flex', 
-      height: '100vh', 
-      fontFamily: 'Segoe UI, sans-serif',
-      backgroundColor: '#36393f',
-      position: 'relative',
-      overflow: 'hidden'
-    },
-    sidebar: { 
-      width: isMobile ? (sidebarOpen ? '100%' : 0) : 240, 
-      backgroundColor: '#2f3136', 
-      color: '#fff', 
-      display: 'flex', 
-      flexDirection: 'column', 
-      padding: isMobile && sidebarOpen ? 20 : (isMobile ? 0 : 20), 
-      gap: 20,
-      position: isMobile ? 'absolute' : 'relative',
-      left: isMobile && !sidebarOpen ? '-100%' : '0',
-      top: 0,
-      bottom: 0,
-      zIndex: 1000,
-      transition: 'left 0.3s ease, padding 0.3s ease',
-      overflow: 'hidden'
-    },
-    mobileMenuButton: {
-      display: isMobile ? 'block' : 'none',
-      position: 'absolute',
-      top: 15,
-      left: 15,
-      zIndex: 1001,
-      background: '#5865f2',
-      border: 'none',
-      color: 'white',
-      padding: '10px',
-      borderRadius: '5px',
-      cursor: 'pointer',
-      fontSize: '16px'
-    },
-    room: { 
-      padding: 12, 
-      borderRadius: 8, 
-      cursor: 'pointer', 
-      backgroundColor: '#36393f', 
-      marginBottom: 8, 
-      transition: '0.2s', 
-      textAlign: 'center',
-      fontSize: isMobile ? '16px' : '14px',
-      fontWeight: '500',
-      '&:hover': {
-        backgroundColor: '#40444b'
-      }
-    },
-    activeRoom: { 
-      backgroundColor: '#5865f2',
-      color: '#fff'
-    },
-    usersList: { 
-      flex: 1, 
-      overflowY: 'auto', 
-      marginTop: 20, 
-      fontSize: isMobile ? '15px' : '14px' 
-    },
-    chatArea: { 
-      flexGrow: 1, 
-      display: 'flex', 
-      flexDirection: 'column', 
-      backgroundColor: '#36393f',
-      width: '100%'
-    },
-    header: { 
-      padding: isMobile ? '12px 15px' : '15px 20px', 
-      borderBottom: '1px solid #444', 
-      display: 'flex', 
-      justifyContent: 'space-between', 
-      alignItems: 'center', 
-      background: '#2f3136',
-      color: '#fff',
-      position: 'relative',
-      minHeight: '60px'
-    },
-    headerLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '15px',
-      flex: 1
-    },
-    roomTitle: {
-      margin: 0,
-      fontSize: isMobile ? '20px' : '20px',
-      fontWeight: '600'
-    },
-    headerActions: {
-      display: 'flex',
-      gap: '10px',
-      alignItems: 'center'
-    },
-    deleteButton: {
-      background: '#ed4245',
-      border: 'none',
-      color: 'white',
-      padding: isMobile ? '6px 12px' : '8px 16px',
-      borderRadius: '20px',
-      cursor: 'pointer',
-      fontSize: isMobile ? '11px' : '12px',
-      fontWeight: '500',
-      transition: 'background 0.2s',
-      '&:hover': {
-        background: '#d84040'
-      }
-    },
-    messages: { 
-      flexGrow: 1, 
-      padding: isMobile ? '15px 10px' : '20px 15px', 
-      overflowY: 'auto', 
-      display: 'flex', 
-      flexDirection: 'column', 
-      gap: 12
-    },
-    message: (fromSelf) => ({
-      alignSelf: fromSelf ? 'flex-end' : 'flex-start',
-      background: fromSelf ? '#5865f2' : '#4f545c',
-      color: '#fff',
-      padding: isMobile ? '10px 14px' : '8px 12px',
-      borderRadius: '18px',
-      maxWidth: isMobile ? '90%' : '70%',
-      wordBreak: 'break-word',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-      fontSize: isMobile ? '16px' : '15px',
-      lineHeight: '1.4'
-    }),
-    messageHeader: {
-      fontSize: isMobile ? '12px' : '12px',
-      opacity: 0.8,
-      marginBottom: 4,
-      fontWeight: '500'
-    },
-    inputArea: { 
-      display: 'flex', 
-      padding: isMobile ? '10px' : '15px', 
-      gap: isMobile ? '8px' : '10px', 
-      borderTop: '1px solid #444', 
-      background: '#40444b',
-      alignItems: 'center'
-    },
-    input: { 
-      flex: 1, 
-      padding: isMobile ? '14px 16px' : '12px 16px', 
-      borderRadius: '25px', 
-      border: 'none', 
-      outline: 'none', 
-      fontSize: isMobile ? '16px' : '15px',
-      background: '#484c52',
-      color: '#fff',
-      minHeight: '20px'
-    },
-    sendButton: { 
-      padding: isMobile ? '12px 18px' : '10px 20px', 
-      borderRadius: '25px', 
-      background: '#5865f2', 
-      border: 'none', 
-      color: '#fff', 
-      cursor: 'pointer', 
-      fontWeight: 'bold',
-      fontSize: isMobile ? '16px' : '15px',
-      minWidth: isMobile ? '70px' : '60px'
-    },
-    fileInput: { 
-      cursor: 'pointer',
-      background: '#484c52',
-      color: '#fff',
-      padding: isMobile ? '8px' : '10px',
-      borderRadius: '5px',
-      fontSize: isMobile ? '13px' : '14px'
-    },
-    typing: { 
-      fontStyle: 'italic', 
-      fontSize: isMobile ? '13px' : '13px', 
-      color: '#aaa', 
-      marginTop: -10,
-      padding: isMobile ? '0 10px' : '0 15px'
-    },
-    userItem: {
-      padding: '6px 0',
-      fontSize: isMobile ? '14px' : '14px',
-      color: '#b9bbbe'
-    },
-    overlay: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      background: 'rgba(0,0,0,0.5)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 2000
-    },
-    confirmModal: {
-      background: '#36393f',
-      padding: '25px',
-      borderRadius: '10px',
-      color: 'white',
-      textAlign: 'center',
-      maxWidth: '90%',
-      width: '400px'
-    },
-    confirmButtons: {
-      display: 'flex',
-      gap: '15px',
-      justifyContent: 'center',
-      marginTop: '20px'
-    },
-    confirmButton: {
-      padding: '10px 20px',
-      borderRadius: '5px',
-      border: 'none',
-      cursor: 'pointer',
-      fontWeight: 'bold',
-      fontSize: '14px'
-    },
-    cancelButton: {
-      background: '#4f545c',
-      color: 'white'
-    },
-    confirmDeleteButton: {
-      background: '#ed4245',
-      color: 'white'
-    },
-    closeSidebarButton: {
-      position: 'absolute',
-      top: 15,
-      right: 15,
-      background: 'none',
-      border: 'none',
-      color: 'white',
-      fontSize: '24px',
-      cursor: 'pointer',
-      zIndex: 1002
-    }
-  };
-
   return (
-    <div style={layoutStyles.container}>
+    <div
+      style={{
+        display: 'flex',
+        height: '100vh',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+        background: isMobile ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : '#1a1a2e',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
       {/* Mobile Menu Button */}
       {isMobile && (
-        <button 
-          style={layoutStyles.mobileMenuButton}
+        <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
+          style={{
+            position: 'fixed',
+            top: '16px',
+            left: '16px',
+            zIndex: 1001,
+            background: 'rgba(255, 255, 255, 0.95)',
+            border: 'none',
+            color: '#667eea',
+            padding: '12px',
+            borderRadius: '12px',
+            cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
         >
-          ☰
+          <Menu size={22} />
         </button>
       )}
 
+      {/* Sidebar Overlay for Mobile */}
+      {isMobile && sidebarOpen && (
+        <div
+          onClick={() => setSidebarOpen(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 999,
+            backdropFilter: 'blur(4px)',
+          }}
+        />
+      )}
+
       {/* Sidebar */}
-      <div style={layoutStyles.sidebar}>
+      <div
+        style={{
+          width: isMobile ? '85%' : '280px',
+          maxWidth: isMobile ? '320px' : '280px',
+          background: isMobile ? 'rgba(255, 255, 255, 0.98)' : 'linear-gradient(180deg, #16213e 0%, #0f1620 100%)',
+          color: isMobile ? '#2d3748' : '#fff',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '20px',
+          gap: '20px',
+          position: isMobile ? 'fixed' : 'relative',
+          left: isMobile && !sidebarOpen ? '-100%' : '0',
+          top: 0,
+          bottom: 0,
+          zIndex: 1000,
+          transition: 'left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: isMobile ? '4px 0 20px rgba(0,0,0,0.1)' : 'none',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+        }}
+      >
+        {/* Close Button for Mobile */}
         {isMobile && sidebarOpen && (
-          <button 
-            style={layoutStyles.closeSidebarButton}
+          <button
             onClick={() => setSidebarOpen(false)}
+            style={{
+              position: 'absolute',
+              top: '16px',
+              right: '16px',
+              background: 'none',
+              border: 'none',
+              color: '#667eea',
+              cursor: 'pointer',
+              padding: '8px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
           >
-            ✕
+            <X size={24} />
           </button>
         )}
-        
-        <h3 style={{ 
-          color: '#fff', 
-          marginBottom: 10, 
-          fontSize: isMobile ? '22px' : '18px',
-          textAlign: 'center',
-          marginTop: isMobile ? '10px' : '0'
-        }}>
-          Chat Rooms
-        </h3>
-        
-        <div style={{ overflowY: 'auto', flex: 1 }}>
+
+        {/* Header */}
+        <div
+          style={{
+            textAlign: 'center',
+            paddingBottom: '16px',
+            borderBottom: isMobile ? '2px solid #e2e8f0' : '2px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          <h3
+            style={{
+              margin: '0 0 8px 0',
+              fontSize: '22px',
+              fontWeight: '700',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}
+          >
+            Chat Rooms
+          </h3>
+          <p
+            style={{
+              margin: 0,
+              fontSize: '13px',
+              color: isMobile ? '#718096' : '#a0aec0',
+              fontWeight: '500',
+            }}
+          >
+            {user?.displayName || user?.username}
+          </p>
+        </div>
+
+        {/* Rooms List */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+          }}
+        >
+          <h4
+            style={{
+              margin: '0 0 8px 0',
+              fontSize: '12px',
+              fontWeight: '600',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              color: isMobile ? '#a0aec0' : '#718096',
+              paddingLeft: '8px',
+            }}
+          >
+            Channels
+          </h4>
           {rooms.map((room) => (
             <div
               key={room}
-              style={{ 
-                ...layoutStyles.room, 
-                ...(currentRoom === room ? layoutStyles.activeRoom : {}) 
-              }}
               onClick={() => handleRoomChange(room)}
+              style={{
+                padding: '14px 16px',
+                borderRadius: '12px',
+                cursor: 'pointer',
+                background:
+                  currentRoom === room
+                    ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
+                    : isMobile
+                    ? '#f7fafc'
+                    : 'rgba(255,255,255,0.05)',
+                color: currentRoom === room ? '#fff' : isMobile ? '#4a5568' : '#e2e8f0',
+                transition: 'all 0.2s ease',
+                fontSize: '15px',
+                fontWeight: currentRoom === room ? '600' : '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                boxShadow: currentRoom === room ? '0 4px 12px rgba(102, 126, 234, 0.4)' : 'none',
+                transform: currentRoom === room ? 'translateX(4px)' : 'none',
+              }}
             >
-              # {room}
+              <span style={{ fontSize: '18px' }}>#</span>
+              {room}
             </div>
           ))}
-          
-          <div style={layoutStyles.usersList}>
-            <h4 style={{ 
-              color: '#fff', 
-              marginBottom: 10, 
-              fontSize: isMobile ? '18px' : '14px',
-              textAlign: 'center'
-            }}>
-              Online Users ({users.length})
+
+          {/* Online Users */}
+          <div
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.03)',
+              borderRadius: '12px',
+              border: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h4
+              style={{
+                margin: '0 0 12px 0',
+                fontSize: '12px',
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: isMobile ? '#a0aec0' : '#718096',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <Users size={14} />
+              Online ({users.length})
             </h4>
-            {users.map((userObj, index) => (
-              <div key={index} style={layoutStyles.userItem}>
-                ● {userObj.username || userObj.displayName}
-              </div>
-            ))}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              {users.map((userObj, index) => (
+                <div
+                  key={index}
+                  style={{
+                    fontSize: '14px',
+                    color: isMobile ? '#4a5568' : '#cbd5e0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '4px 0',
+                  }}
+                >
+                  <Circle size={8} fill={isMobile ? '#48bb78' : '#48bb78'} color={isMobile ? '#48bb78' : '#48bb78'} />
+                  {userObj.username || userObj.displayName}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-        
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: 'auto' }}>
-          <button 
-            onClick={() => setShowDeleteConfirm(true)} 
+
+        {/* Action Buttons */}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px',
+            paddingTop: '16px',
+            borderTop: isMobile ? '2px solid #e2e8f0' : '2px solid rgba(255,255,255,0.1)',
+          }}
+        >
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
             style={{
-              ...layoutStyles.deleteButton,
-              background: '#faa61a',
-              fontSize: isMobile ? '14px' : '12px',
-              padding: isMobile ? '10px' : '8px 16px'
+              padding: '12px',
+              borderRadius: '10px',
+              border: 'none',
+              background: isMobile ? '#fed7d7' : 'rgba(245, 101, 101, 0.1)',
+              color: isMobile ? '#c53030' : '#fc8181',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s ease',
             }}
           >
+            <Trash2 size={16} />
             Clear Chat
           </button>
-          
-          <button 
-            onClick={handleLogout} 
+
+          <button
+            onClick={handleLogout}
             style={{
-              ...layoutStyles.sendButton,
-              background: '#ed4245',
-              fontSize: isMobile ? '14px' : '15px'
+              padding: '12px',
+              borderRadius: '10px',
+              border: 'none',
+              background: isMobile ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)',
+              color: '#fff',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
             }}
           >
+            <LogOut size={16} />
             Logout
           </button>
         </div>
       </div>
 
       {/* Main Chat Area */}
-      <div style={layoutStyles.chatArea}>
-        <div style={layoutStyles.header}>
-          <div style={layoutStyles.headerLeft}>
-            <h2 style={layoutStyles.roomTitle}># {currentRoom}</h2>
-            <div style={{ 
-              color: '#b9bbbe', 
-              fontSize: isMobile ? '14px' : '14px' 
-            }}>
-              {user?.displayName || user?.username}
-            </div>
+      <div
+        style={{
+          flexGrow: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          background: isMobile ? '#ffffff' : '#0f0f1e',
+          width: '100%',
+          position: 'relative',
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: isMobile ? '20px 16px 16px 16px' : '20px 30px',
+            borderBottom: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: isMobile ? 'rgba(255, 255, 255, 0.95)' : 'rgba(15, 15, 30, 0.8)',
+            backdropFilter: 'blur(10px)',
+            minHeight: '70px',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              flex: 1,
+              marginLeft: isMobile ? '50px' : '0',
+            }}
+          >
+            <h2
+              style={{
+                margin: 0,
+                fontSize: isMobile ? '20px' : '24px',
+                fontWeight: '700',
+                color: isMobile ? '#2d3748' : '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span
+                style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                }}
+              >
+                #
+              </span>
+              {currentRoom}
+            </h2>
           </div>
-          
-          <div style={layoutStyles.headerActions}>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
             {!isMobile && (
               <button 
                 onClick={() => setShowDeleteConfirm(true)} 
-                style={layoutStyles.deleteButton}
+                style={{
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  border: 'none',
+                  background: 'rgba(245, 101, 101, 0.1)',
+                  color: '#fc8181',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  transition: 'all 0.2s ease',
+                }}
               >
+                <Trash2 size={14} />
                 Clear Chat
               </button>
             )}
-            <div style={{ 
-              width: '10px', 
-              height: '10px', 
-              borderRadius: '50%', 
-              background: ws.current?.readyState === WebSocket.OPEN ? '#43b581' : '#faa61a' 
-            }} />
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+                borderRadius: '20px',
+                fontSize: '12px',
+                fontWeight: '600',
+                color: isConnected ? (isMobile ? '#38a169' : '#48bb78') : (isMobile ? '#dd6b20' : '#ed8936'),
+              }}
+            >
+              <div
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: isConnected ? '#48bb78' : '#ed8936',
+                  boxShadow: isConnected ? '0 0 8px rgba(72, 187, 120, 0.6)' : '0 0 8px rgba(237, 137, 54, 0.6)',
+                }}
+              />
+              {isConnected ? 'Online' : 'Connecting'}
+            </div>
           </div>
         </div>
-        
-        <div style={layoutStyles.messages}>
+
+        {/* Messages Area */}
+        <div
+          style={{
+            flexGrow: 1,
+            padding: isMobile ? '20px 12px' : '24px 30px',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
+            background: isMobile ? '#f7fafc' : 'transparent',
+          }}
+        >
           {messages.length === 0 ? (
-            <div style={{ 
-              textAlign: 'center', 
-              color: '#72767d', 
-              marginTop: 50,
-              fontSize: isMobile ? '16px' : '16px',
-              padding: isMobile ? '20px' : '0'
-            }}>
-              No messages yet. Start the conversation!
+            <div
+              style={{
+                textAlign: 'center',
+                color: isMobile ? '#a0aec0' : '#718096',
+                marginTop: '60px',
+                fontSize: '16px',
+                padding: '40px 20px',
+              }}
+            >
+              <div style={{ fontSize: '48px', marginBottom: '16px', opacity: 0.5 }}>💬</div>
+              <p style={{ margin: 0, fontWeight: '500' }}>No messages yet</p>
+              <p style={{ margin: '8px 0 0 0', fontSize: '14px', opacity: 0.7 }}>Start the conversation!</p>
             </div>
           ) : (
-            messages.map((msg) => (
-              <div key={msg.id} style={layoutStyles.message(msg.sender === user?.username)}>
-                <div style={layoutStyles.messageHeader}>
-                  {msg.senderName || msg.sender} • {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            messages.map((msg, index) => {
+              // Fallback key when id missing
+              const key = msg?.id ?? `${index}-${msg?.timestamp ?? ''}`;
+              return (
+                <div
+                  key={key}
+                  style={{
+                    display: 'flex',
+                    justifyContent: msg.sender === user?.username ? 'flex-end' : 'flex-start',
+                    alignItems: 'flex-end',
+                    gap: '8px',
+                  }}
+                >
+                  <div
+                    style={{
+                      maxWidth: isMobile ? '85%' : '60%',
+                      background: msg.sender === user?.username ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
+                      color: msg.sender === user?.username ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
+                      padding: '12px 16px',
+                      borderRadius: msg.sender === user?.username ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                      boxShadow: msg.sender === user?.username ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
+                      wordBreak: 'break-word',
+                      border: isMobile && msg.sender !== user?.username ? '1px solid #e2e8f0' : 'none',
+                    }}
+                  >
+                    <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      {msg.senderName || msg.sender} • {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                    </div>
+
+                    {msg.isFile ? (
+                      msg.fileType === 'image' ? (
+                        <div>
+                          <img src={msg.content} alt="sent" style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '8px' }} />
+                          <div style={{ marginTop: '8px' }}>
+                            <a href={msg.content} download style={{ color: msg.sender === user?.username ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
+                              Download Image
+                            </a>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <video controls style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '8px' }}>
+                            <source src={msg.content} type="video/mp4" />
+                          </video>
+                          <div style={{ marginTop: '8px' }}>
+                            <a href={msg.content} download style={{ color: msg.sender === user?.username ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
+                              Download Video
+                            </a>
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{msg.content}</div>
+                    )}
+                  </div>
                 </div>
-                {msg.isFile ? (
-                  msg.fileType === 'image' ? (
-                    <div>
-                      <img 
-                        src={msg.content} 
-                        alt="sent" 
-                        style={{ 
-                          maxWidth: '100%', 
-                          borderRadius: 10, 
-                          marginTop: 5 
-                        }} 
-                      />
-                      <div>
-                        <a 
-                          href={msg.content} 
-                          download 
-                          style={{ 
-                            color: '#ccc', 
-                            fontSize: isMobile ? '13px' : '12px', 
-                            textDecoration: 'underline' 
-                          }}
-                        >
-                          Download Image
-                        </a>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <video 
-                        controls 
-                        style={{ 
-                          maxWidth: '100%', 
-                          borderRadius: 10, 
-                          marginTop: 5 
-                        }}
-                      >
-                        <source src={msg.content} type="video/mp4" />
-                      </video>
-                      <div>
-                        <a 
-                          href={msg.content} 
-                          download 
-                          style={{ 
-                            color: '#ccc', 
-                            fontSize: isMobile ? '13px' : '12px', 
-                            textDecoration: 'underline' 
-                          }}
-                        >
-                          Download Video
-                        </a>
-                      </div>
-                    </div>
-                  )
-                ) : (
-                  msg.content
-                )}
-              </div>
-            ))
+              );
+            })
           )}
-          
+
           {typingUsers.length > 0 && (
-            <div style={layoutStyles.typing}>
+            <div style={{ fontSize: '13px', color: isMobile ? '#718096' : '#718096', fontStyle: 'italic', padding: '0 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out infinite' }} />
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
+              </div>
               {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
             </div>
           )}
+
           <div ref={messagesEndRef} />
         </div>
 
         {/* Input Area */}
-        <div style={layoutStyles.inputArea}>
-          <input 
-            type="file" 
-            accept="image/*,video/*" 
-            onChange={(e) => setFile(e.target.files[0])} 
-            style={layoutStyles.fileInput} 
-          />
-          <input 
-            placeholder="Type your message..." 
-            value={inputMessage} 
-            onChange={handleInputChange} 
-            onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()} 
-            style={layoutStyles.input} 
-          />
-          <button 
-            onClick={handleSendMessage} 
-            disabled={!inputMessage.trim() && !file}
+        <div
+          style={{
+            padding: isMobile ? '16px' : '20px 30px',
+            borderTop: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
+            background: isMobile ? '#ffffff' : 'rgba(15, 15, 30, 0.8)',
+            backdropFilter: 'blur(10px)',
+            position: 'sticky',
+            bottom: 0,
+          }}
+        >
+          <div
             style={{
-              ...layoutStyles.sendButton,
-              opacity: (!inputMessage.trim() && !file) ? 0.6 : 1
+              display: 'flex',
+              alignItems: 'center',
+              gap: isMobile ? '10px' : '12px',
+              background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+              padding: isMobile ? '8px' : '8px',
+              borderRadius: '24px',
+              border: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)',
             }}
           >
-            Send
-          </button>
+            <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: 'none' }} id="file-upload" />
+            <label
+              htmlFor="file-upload"
+              style={{
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '10px',
+                borderRadius: '50%',
+                background: isMobile ? 'transparent' : 'rgba(255,255,255,0.05)',
+                transition: 'all 0.2s ease',
+                color: isMobile ? '#667eea' : '#a0aec0',
+              }}
+            >
+              <Paperclip size={20} />
+            </label>
+
+            <input
+              placeholder="Type your message..."
+              value={inputMessage}
+              onChange={handleInputChange}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              style={{
+                flex: 1,
+                padding: '14px 16px',
+                borderRadius: '20px',
+                border: 'none',
+                outline: 'none',
+                fontSize: '15px',
+                background: isMobile ? '#ffffff' : 'rgba(255,255,255,0.03)',
+                color: isMobile ? '#2d3748' : '#fff',
+                fontFamily: 'inherit',
+              }}
+            />
+
+            <button
+              onClick={handleSendMessage}
+              disabled={!inputMessage.trim() && !file}
+              style={{
+                padding: '12px',
+                borderRadius: '50%',
+                background: !inputMessage.trim() && !file ? (isMobile ? '#cbd5e0' : 'rgba(255,255,255,0.1)') : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                border: 'none',
+                color: '#fff',
+                cursor: !inputMessage.trim() && !file ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+                opacity: !inputMessage.trim() && !file ? 0.5 : 1,
+                boxShadow: !inputMessage.trim() && !file ? 'none' : '0 4px 12px rgba(102, 126, 234, 0.4)',
+                minWidth: '44px',
+                minHeight: '44px',
+              }}
+            >
+              <Send size={20} />
+            </button>
+          </div>
+
+          {file && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 16px',
+                background: isMobile ? '#e6fffa' : 'rgba(72, 187, 120, 0.1)',
+                borderRadius: '12px',
+                fontSize: '13px',
+                color: isMobile ? '#2c7a7b' : '#68d391',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                border: isMobile ? '1px solid #81e6d9' : '1px solid rgba(72, 187, 120, 0.2)',
+              }}
+            >
+              <span>📎 {file.name}</span>
+              <button
+                onClick={() => {
+                  setFile(null);
+                  if (fileInputRef.current) fileInputRef.current.value = '';
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isMobile ? '#2c7a7b' : '#68d391',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
-        <div style={layoutStyles.overlay}>
-          <div style={layoutStyles.confirmModal}>
-            <h3 style={{ margin: '0 0 15px 0' }}>Clear Chat</h3>
-            <p style={{ margin: '0 0 20px 0', color: '#b9bbbe' }}>
-              Are you sure you want to clear all messages in #{currentRoom}? This action cannot be undone.
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            backdropFilter: 'blur(4px)',
+            padding: '20px',
+          }}
+        >
+          <div
+            style={{
+              background: isMobile ? '#ffffff' : '#1a1a2e',
+              padding: '30px',
+              borderRadius: '20px',
+              color: isMobile ? '#2d3748' : 'white',
+              textAlign: 'center',
+              maxWidth: '90%',
+              width: '400px',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+              border: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)',
+            }}
+          >
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>🗑️</div>
+            <h3 style={{ margin: '0 0 12px 0', fontSize: '22px', fontWeight: '700', color: isMobile ? '#2d3748' : '#fff' }}>Clear Chat</h3>
+            <p style={{ margin: '0 0 24px 0', color: isMobile ? '#718096' : '#a0aec0', fontSize: '15px', lineHeight: '1.6' }}>
+              Are you sure you want to clear all messages in <strong>#{currentRoom}</strong>? This action cannot be undone.
             </p>
-            <div style={layoutStyles.confirmButtons}>
-              <button 
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+              <button
                 onClick={() => setShowDeleteConfirm(false)}
-                style={{ ...layoutStyles.confirmButton, ...layoutStyles.cancelButton }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '15px',
+                  background: isMobile ? '#e2e8f0' : 'rgba(255,255,255,0.1)',
+                  color: isMobile ? '#4a5568' : '#e2e8f0',
+                  transition: 'all 0.2s ease',
+                  minWidth: '100px',
+                }}
               >
                 Cancel
               </button>
-              <button 
+              <button
                 onClick={handleDeleteChat}
-                style={{ ...layoutStyles.confirmButton, ...layoutStyles.confirmDeleteButton }}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                  fontSize: '15px',
+                  background: 'linear-gradient(135deg, #f56565 0%, #e53e3e 100%)',
+                  color: 'white',
+                  transition: 'all 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(245, 101, 101, 0.4)',
+                  minWidth: '100px',
+                }}
               >
                 Clear All
               </button>
@@ -789,6 +1062,41 @@ const ChatApp = () => {
           </div>
         </div>
       )}
+
+      {/* Add pulse animation */}
+      <style>{`
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 0.4;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.2);
+          }
+        }
+        
+        /* Custom scrollbar for desktop */
+        ${!isMobile ? `
+          ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+          }
+          
+          ::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.05);
+          }
+          
+          ::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.5);
+            border-radius: 4px;
+          }
+          
+          ::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.7);
+          }
+        ` : ''}
+      `}</style>
     </div>
   );
 };
