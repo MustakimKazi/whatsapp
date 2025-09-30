@@ -5,213 +5,314 @@ const http = require('http');
 const WebSocket = require('ws');
 const uuid = require('uuid');
 const bcrypt = require('bcryptjs');
-const mysql = require('mysql2/promise');
 const bodyParser = require('body-parser');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { MongoClient } = require('mongodb');
+
+// === MongoDB Connection ===
+// Use your exact connection string that works in Compass
+const uri = "mongodb+srv://mohdmustakimkazi_db_user:HugPu2kIqGxOdhNF@whatsapp.dzac4go.mongodb.net/?retryWrites=true&w=majority&appName=whatsapp";
+
+console.log('🔗 Connecting to MongoDB...');
+
+const client = new MongoClient(uri, {
+  serverSelectionTimeoutMS: 10000,
+  connectTimeoutMS: 15000,
+});
+
+let db;
+let isConnected = false;
+
+async function connectDB() {
+  if (db && isConnected) return db;
+  
+  try {
+    await client.connect();
+    db = client.db('whatsapp'); // Your database name
+    isConnected = true;
+    
+    console.log('✅ Connected to MongoDB Atlas - WhatsApp Database');
+    
+    // Check existing data
+    const users = db.collection('users');
+    const userCount = await users.countDocuments();
+    console.log(`📊 Found ${userCount} existing users in database`);
+    
+    return db;
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    return null;
+  }
+}
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://whatsapp-n8xf.vercel.app',
-  'https://whatsapp-60un.onrender.com',
-];
-
-
+// CORS setup
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: ['http://localhost:5173', 'https://whatsapp-n8xf.vercel.app', 'https://whatsapp-60un.onrender.com'],
   credentials: true,
 }));
 
 app.use(bodyParser.json());
 
-const pool = require('./db');
-
-const rooms = ['general', 'random', 'help'];
-let messages = [];
-
-function generateToken() {
-  return uuid.v4();
-}
-
-// === File Upload Setup ===
+// === File upload setup ===
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
-if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
-
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname);
-    cb(null, `${Date.now()}-${uuid.v4()}${ext}`);
-  },
+  filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
 const upload = multer({ storage });
 app.use('/uploads', express.static(UPLOAD_DIR));
 
-app.post('/api/upload', upload.single('file'), (req, res) => {
-  const file = req.file;
-  if (!file) return res.status(400).json({ error: 'No file uploaded' });
+// === Utility functions ===
+function generateToken() {
+  return uuid.v4();
+}
 
-  const baseUrl = req.protocol + '://' + req.get('host');
-  const fileUrl = `${baseUrl}/uploads/${file.filename}`;
+// === Routes ===
+
+// Health check
+app.get('/api/health', async (req, res) => {
+  const db = await connectDB();
+  res.json({ 
+    status: db ? 'Connected' : 'Disconnected',
+    database: 'whatsapp',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// File upload
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
   res.json({ url: fileUrl });
 });
 
-// === SIGN UP ===
+// === SIGNUP (Fixed for your existing data) ===
 app.post('/api/sign_up', async (req, res) => {
   const { email, username, password } = req.body;
-  if (!email || !username || !password) return res.status(400).json({ error: 'All fields required' });
+  
+  if (!email || !username || !password) {
+    return res.status(400).json({ error: 'All fields are required' });
+  }
 
   try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (rows.length > 0) return res.status(400).json({ error: 'Email already exists' });
+    const db = await connectDB();
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
 
+    const users = db.collection('users');
+
+    // Check if email already exists
+    if (await users.findOne({ email })) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+
+    // Hash password (unlike your existing plain text passwords)
     const password_hash = await bcrypt.hash(password, 10);
-    await pool.query(
-      'INSERT INTO users (email, username, password_hash, token, status) VALUES (?, ?, ?, NULL, "offline")',
-      [email, username, password_hash]
-    );
+    
+    await users.insertOne({ 
+      email, 
+      username, 
+      password_hash,  // ✅ Secure hashed password
+      token: null, 
+      status: "offline",
+      createdAt: new Date().toISOString()
+    });
 
-    res.json({ message: 'User created. Please login.' });
+    console.log('👤 New user registered:', username);
+    res.json({ message: 'User created successfully. Please login.' });
   } catch (err) {
-    console.error(err);
-    res.sendStatus(500);
+    console.error('Signup error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// === LOGIN ===
+// === LOGIN (Works with your existing users) ===
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
 
-  try {
-    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password required' });
+  }
 
-    const user = rows[0];
-    const match = await bcrypt.compare(password, user.password_hash);
-    if (!match) return res.status(400).json({ error: 'Incorrect password' });
+  try {
+    const db = await connectDB();
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+    const users = db.collection('users');
+    const user = await users.findOne({ email });
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check password - handle both hashed and plain text (for existing users)
+    let isPasswordValid = false;
+    
+    if (user.password_hash) {
+      // New users with hashed passwords
+      isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    } else if (user.password_ba81d) {
+      // Existing users with plain text passwords (from your screenshot)
+      isPasswordValid = (password === user.password_ba81d);
+      
+      // Auto-upgrade to hashed password
+      if (isPasswordValid) {
+        const password_hash = await bcrypt.hash(password, 10);
+        await users.updateOne({ email }, { 
+          $set: { password_hash },
+          $unset: { password_ba81d: "" } // Remove plain text password
+        });
+      }
+    }
+
+    if (!isPasswordValid) {
+      return res.status(400).json({ error: 'Incorrect password' });
+    }
 
     const token = generateToken();
-    await pool.query('UPDATE users SET status = "online", token = ? WHERE email = ?', [token, email]);
+    await users.updateOne({ email }, { 
+      $set: { 
+        token, 
+        status: "online",
+        lastLogin: new Date().toISOString()
+      } 
+    });
 
-    res.json({ user: { email, username: user.username, token } });
+    console.log('🔑 User logged in:', user.username);
+    res.json({ 
+      user: { 
+        email: user.email, 
+        username: user.username, 
+        token 
+      } 
+    });
   } catch (err) {
-    console.error(err);
-    res.sendStatus(500);
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// === LOGOUT ===
-app.post('/api/logout', async (req, res) => {
-  const token = req.headers.authorization;
-  await pool.query('UPDATE users SET status = "offline", token = NULL WHERE token = ?', [token]);
-  res.sendStatus(200);
+// === GET ALL USERS ===
+app.get('/api/users', async (req, res) => {
+  try {
+    const db = await connectDB();
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+    const users = db.collection('users');
+    const allUsers = await users.find({})
+      .project({ password_hash: 0, password_ba81d: 0, token: 0 }) // Hide sensitive data
+      .sort({ username: 1 })
+      .toArray();
+    
+    res.json(allUsers);
+  } catch (err) {
+    console.error('Get users error:', err);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
 });
 
-// === GET MESSAGES BY ROOM ===
+// === GET MESSAGES ===
 app.get('/api/messages/:room', async (req, res) => {
   const token = req.headers.authorization;
-  const [rows] = await pool.query('SELECT * FROM users WHERE token = ?', [token]);
-  if (rows.length === 0) return res.sendStatus(401);
+  if (!token) return res.status(401).json({ error: 'Authentication required' });
 
-  const roomMessages = messages.filter((m) => m.room === req.params.room);
-  res.json(roomMessages);
-  res.send('✅ WhatsApp Node backend is live');
+  try {
+    const db = await connectDB();
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+
+    const users = db.collection('users');
+    const messagesCollection = db.collection('messages');
+
+    const user = await users.findOne({ token });
+    if (!user) return res.status(401).json({ error: 'Invalid token' });
+
+    const roomMessages = await messagesCollection
+      .find({ room: req.params.room })
+      .sort({ timestamp: 1 })
+      .toArray();
+
+    res.json(roomMessages);
+  } catch (err) {
+    console.error('Get messages error:', err);
+    res.status(500).json({ error: 'Failed to fetch messages' });
+  }
 });
 
-const getOnlineUsers = async () => {
-  const [rows] = await pool.query('SELECT username FROM users WHERE status = "online"');
-  return rows;
-};
-
-// === WEBSOCKET HANDLING ===
+// === WEBSOCKET ===
 wss.on('connection', (ws) => {
+  console.log('🔌 New WebSocket connection');
   ws.user = null;
 
-  ws.on('message', async (msg) => {
-    let data;
+  ws.on('message', async (data) => {
     try {
-      data = JSON.parse(msg);
-    } catch {
-      return ws.send(JSON.stringify({ type: 'error', message: 'Invalid JSON' }));
-    }
+      const message = JSON.parse(data);
+      
+      if (message.type === 'auth') {
+        // Authentication
+        const db = await connectDB();
+        if (db) {
+          const users = db.collection('users');
+          const user = await users.findOne({ token: message.token });
+          if (user) {
+            ws.user = user;
+            ws.send(JSON.stringify({ type: 'authSuccess', user: { username: user.username } }));
+          }
+        }
+      }
+      
+      if (message.type === 'message' && ws.user) {
+        const db = await connectDB();
+        const messagesCollection = db.collection('messages');
+        
+        const newMessage = {
+          id: uuid.v4(),
+          sender: ws.user.username,
+          content: message.content,
+          room: message.room || 'general',
+          timestamp: new Date().toISOString(),
+        };
 
-    if (data.type === 'auth') {
-      const [rows] = await pool.query('SELECT * FROM users WHERE token = ?', [data.token]);
-      if (rows.length === 0) return;
+        await messagesCollection.insertOne(newMessage);
 
-      ws.user = rows[0];
-      await pool.query('UPDATE users SET status = "online" WHERE token = ?', [data.token]);
-
-      ws.send(JSON.stringify({
-        type: 'authSuccess',
-        user: { username: ws.user.username },
-        users: await getOnlineUsers(),
-        rooms,
-      }));
-
-      broadcastUsers();
-    }
-
-    if (data.type === 'message' && ws.user) {
-      const message = {
-        id: uuid.v4(),
-        sender: ws.user.username,
-        content: data.content,
-        room: data.room || 'general',
-        timestamp: new Date().toISOString(),
-        isFile: data.isFile || false,
-        fileType: data.fileType || '',
-      };
-      messages.push(message);
-      broadcastAll({ type: 'message', data: message });
-    }
-
-    if (data.type === 'typing' && ws.user) {
-      broadcastAll({
-        type: 'typing',
-        username: ws.user.username,
-        typing: data.typing,
-        room: data.room,
-      });
-    }
-
-    if (data.type === 'clear' && ws.user) {
-      messages = messages.filter((m) => m.room !== data.room);
-      broadcastAll({ type: 'clear', room: data.room });
-    }
-  });
-
-  ws.on('close', async () => {
-    if (ws.user) {
-      await pool.query('UPDATE users SET status = "offline" WHERE token = ?', [ws.user.token]);
-      broadcastUsers();
+        // Broadcast to all clients
+        wss.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'message',
+              data: newMessage
+            }));
+          }
+        });
+      }
+    } catch (err) {
+      console.error('WebSocket error:', err);
     }
   });
 });
 
-function broadcastUsers() {
-  getOnlineUsers().then((users) => {
-    broadcastAll({ type: 'users', data: users });
-  });
-}
-
-function broadcastAll(data) {
-  const msg = JSON.stringify(data);
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) client.send(msg);
-  });
-}
-
+// === START SERVER ===
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+server.listen(PORT, async () => {
+  console.log('='.repeat(50));
+  console.log(`✅ WhatsApp Server running on port ${PORT}`);
+  
+  // Test connection
+  const db = await connectDB();
+  if (db) {
+    console.log('✅ Connected to your existing WhatsApp database');
+    console.log('✅ Existing users can login with their current passwords');
+  } else {
+    console.log('❌ Database connection failed');
+  }
+  
+  console.log(`✅ Health: http://localhost:${PORT}/api/health`);
+  console.log('='.repeat(50));
+});
