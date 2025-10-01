@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff, Image, Video, Eye, Check, CheckCheck } from 'lucide-react';
+import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff, Image, Video, Eye, Check, CheckCheck, Bell, BellOff, Settings } from 'lucide-react';
 import { AuthContext } from '../../AuthContext';
 
 // Enhanced Typing Indicator Component
@@ -37,6 +37,170 @@ const TypingIndicator = ({ typingUsers, isMobile }) => {
         backgroundClip: 'text'
       }}>
         {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+      </div>
+    </div>
+  );
+};
+
+// NEW: Typing Mention Indicator Component
+const TypingMentionIndicator = ({ mentionData, onClose, isMobile }) => {
+  if (!mentionData) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      background: isMobile ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'linear-gradient(135deg, #ed8936 0%, #dd6b20 100%)',
+      color: 'white',
+      padding: '16px 20px',
+      borderRadius: '12px',
+      boxShadow: '0 8px 25px rgba(0,0,0,0.2)',
+      zIndex: 2000,
+      maxWidth: '300px',
+      animation: 'slideInRight 0.3s ease-out',
+      border: '2px solid rgba(255,255,255,0.2)',
+      backdropFilter: 'blur(10px)'
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '12px'
+      }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.2)',
+          borderRadius: '8px',
+          padding: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <span style={{ fontSize: '18px' }}>⌨️</span>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ 
+            fontWeight: '700', 
+            fontSize: '14px',
+            marginBottom: '4px'
+          }}>
+            {mentionData.mentionedByDisplayName} mentioned you
+          </div>
+          <div style={{ 
+            fontSize: '12px', 
+            opacity: 0.9,
+            fontStyle: 'italic'
+          }}>
+            "{mentionData.content.substring(0, 50)}{mentionData.content.length > 50 ? '...' : ''}"
+          </div>
+          <div style={{ 
+            fontSize: '10px', 
+            opacity: 0.7,
+            marginTop: '6px'
+          }}>
+            in #{mentionData.room}
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'rgba(255,255,255,0.2)',
+            border: 'none',
+            color: 'white',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// NEW: Push Notification Component
+const PushNotification = ({ notification, onClose, isMobile }) => {
+  if (!notification) return null;
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      left: '20px',
+      background: isMobile ? 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      color: 'white',
+      padding: '16px 20px',
+      borderRadius: '12px',
+      boxShadow: '0 8px 25px rgba(0,0,0,0.2)',
+      zIndex: 2000,
+      maxWidth: '300px',
+      animation: 'slideInLeft 0.3s ease-out',
+      border: '2px solid rgba(255,255,255,0.2)',
+      backdropFilter: 'blur(10px)',
+      cursor: 'pointer'
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '12px'
+      }}>
+        <div style={{
+          background: 'rgba(255,255,255,0.2)',
+          borderRadius: '8px',
+          padding: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          <span style={{ fontSize: '18px' }}>💬</span>
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ 
+            fontWeight: '700', 
+            fontSize: '14px',
+            marginBottom: '4px'
+          }}>
+            New message from {notification.senderName}
+          </div>
+          <div style={{ 
+            fontSize: '12px', 
+            opacity: 0.9
+          }}>
+            {notification.isFile ? 
+              (notification.fileType === 'image' ? '📷 Sent an image' : '🎥 Sent a video') : 
+              `"${notification.content.substring(0, 50)}${notification.content.length > 50 ? '...' : ''}"`
+            }
+          </div>
+          <div style={{ 
+            fontSize: '10px', 
+            opacity: 0.7,
+            marginTop: '6px'
+          }}>
+            in #{notification.room}
+          </div>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClose();
+          }}
+          style={{
+            background: 'rgba(255,255,255,0.2)',
+            border: 'none',
+            color: 'white',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            padding: '4px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center'
+          }}
+        >
+          <X size={14} />
+        </button>
       </div>
     </div>
   );
@@ -108,6 +272,250 @@ const UserStatus = ({ user, isOnline, lastSeen, isMobile, isCurrentUser }) => {
       }}>
         {!isOnline && lastSeen && <Clock size={10} />}
         {statusText}
+      </div>
+    </div>
+  );
+};
+
+// NEW: Notification Settings Component
+const NotificationSettings = ({ settings, onUpdate, onClose, isMobile }) => {
+  const [localSettings, setLocalSettings] = useState(settings);
+
+  const handleSave = () => {
+    onUpdate(localSettings);
+    onClose();
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0,0,0,0.6)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 2000,
+      backdropFilter: 'blur(4px)',
+      padding: '20px',
+    }}>
+      <div style={{
+        background: isMobile ? '#ffffff' : '#1a1a2e',
+        padding: '30px',
+        borderRadius: '20px',
+        color: isMobile ? '#2d3748' : 'white',
+        maxWidth: '90%',
+        width: '400px',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+        border: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)',
+      }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          justifyContent: 'space-between',
+          marginBottom: '24px'
+        }}>
+          <h3 style={{ 
+            margin: 0, 
+            fontSize: '22px', 
+            fontWeight: '700',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            <Settings size={24} />
+            Notification Settings
+          </h3>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: isMobile ? '#718096' : '#a0aec0',
+              cursor: 'pointer',
+              padding: '8px',
+              borderRadius: '8px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{
+            padding: '16px',
+            background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+            borderRadius: '12px',
+            border: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px'
+            }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '16px' }}>
+                  Push Notifications
+                </div>
+                <div style={{ fontSize: '12px', color: isMobile ? '#718096' : '#a0aec0' }}>
+                  Receive notifications when away from chat
+                </div>
+              </div>
+              <label style={{
+              position: 'relative',
+              display: 'inline-block',
+              width: '50px',
+              height: '24px'
+            }}>
+              <input
+                type="checkbox"
+                checked={localSettings.notificationsEnabled}
+                onChange={(e) => setLocalSettings(prev => ({
+                  ...prev,
+                  notificationsEnabled: e.target.checked
+                }))}
+                style={{
+                  opacity: 0,
+                  width: 0,
+                  height: 0
+                }}
+              />
+              <span style={{
+                position: 'absolute',
+                cursor: 'pointer',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: localSettings.notificationsEnabled ? '#48bb78' : '#ccc',
+                transition: '0.4s',
+                borderRadius: '24px'
+              }}>
+                <span style={{
+                  position: 'absolute',
+                  content: '""',
+                  height: '16px',
+                  width: '16px',
+                  left: localSettings.notificationsEnabled ? '26px' : '4px',
+                  bottom: '4px',
+                  backgroundColor: 'white',
+                  transition: '0.4s',
+                  borderRadius: '50%'
+                }} />
+              </span>
+            </label>
+            </div>
+          </div>
+
+          <div style={{
+            padding: '16px',
+            background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+            borderRadius: '12px',
+            border: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '12px'
+            }}>
+              <div>
+                <div style={{ fontWeight: '600', fontSize: '16px' }}>
+                  Mention Alerts
+                </div>
+                <div style={{ fontSize: '12px', color: isMobile ? '#718096' : '#a0aec0' }}>
+                  Get notified when someone types your name
+                </div>
+              </div>
+              <label style={{
+              position: 'relative',
+              display: 'inline-block',
+              width: '50px',
+              height: '24px'
+            }}>
+              <input
+                type="checkbox"
+                checked={localSettings.mentionNotifications}
+                onChange={(e) => setLocalSettings(prev => ({
+                  ...prev,
+                  mentionNotifications: e.target.checked
+                }))}
+                style={{
+                  opacity: 0,
+                  width: 0,
+                  height: 0
+                }}
+              />
+              <span style={{
+                position: 'absolute',
+                cursor: 'pointer',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: localSettings.mentionNotifications ? '#ed8936' : '#ccc',
+                transition: '0.4s',
+                borderRadius: '24px'
+              }}>
+                <span style={{
+                  position: 'absolute',
+                  content: '""',
+                  height: '16px',
+                  width: '16px',
+                  left: localSettings.mentionNotifications ? '26px' : '4px',
+                  bottom: '4px',
+                  backgroundColor: 'white',
+                  transition: '0.4s',
+                  borderRadius: '50%'
+                }} />
+              </span>
+            </label>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '12px 24px',
+              borderRadius: '12px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '15px',
+              background: isMobile ? '#e2e8f0' : 'rgba(255,255,255,0.1)',
+              color: isMobile ? '#4a5568' : '#e2e8f0',
+              transition: 'all 0.2s ease',
+              flex: 1,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            style={{
+              padding: '12px 24px',
+              borderRadius: '12px',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '15px',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              transition: 'all 0.2s ease',
+              flex: 1,
+            }}
+          >
+            Save Settings
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -630,16 +1038,41 @@ const ChatApp = () => {
   const [isConnected, setIsConnected] = useState(false);
   const [staticUsers, setStaticUsers] = useState([]);
   const [showMediaPreview, setShowMediaPreview] = useState(false);
+  
+  // NEW: State for notifications and mentions
+  const [pushNotification, setPushNotification] = useState(null);
+  const [typingMention, setTypingMention] = useState(null);
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false);
+  const [notificationSettings, setNotificationSettings] = useState({
+    notificationsEnabled: true,
+    mentionNotifications: true
+  });
 
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const hasConnectedRef = useRef(false);
+  const reconnectAttemptsRef = useRef(0);
+  const maxReconnectAttempts = 5;
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
   const BASE_URL = 'https://backend-bl4w.onrender.com';
   const WS_URL = 'wss://backend-bl4w.onrender.com';
+
+  // NEW: Check if browser tab is active
+  const [isTabActive, setIsTabActive] = useState(true);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsTabActive(!document.hidden);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   // Fetch static users from backend
   const fetchStaticUsers = async () => {
@@ -666,6 +1099,29 @@ const ChatApp = () => {
       }
     } catch (error) {
       console.error('❌ Error fetching users:', error);
+    }
+  };
+
+  // NEW: Update notification settings on backend
+  const updateNotificationSettings = async (newSettings) => {
+    try {
+      const response = await axios.post(`${BASE_URL}/api/notification-settings`, {
+        token: user?.token,
+        ...newSettings
+      });
+      
+      if (response.data.success) {
+        setNotificationSettings(newSettings);
+        // Also update via WebSocket for real-time
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+          ws.current.send(JSON.stringify({
+            type: 'notificationSettings',
+            ...newSettings
+          }));
+        }
+      }
+    } catch (error) {
+      console.error('Error updating notification settings:', error);
     }
   };
 
@@ -710,6 +1166,16 @@ const ChatApp = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // NEW: Initialize notification settings from user data
+  useEffect(() => {
+    if (user) {
+      setNotificationSettings({
+        notificationsEnabled: user.notificationsEnabled !== false,
+        mentionNotifications: user.mentionNotifications !== false
+      });
+    }
+  }, [user]);
+
   // Initial load: auth from context, connect ws, load messages/rooms
   useEffect(() => {
     if (!user) {
@@ -752,6 +1218,7 @@ const ChatApp = () => {
     if (isMobile) setSidebarOpen(false);
   }, [currentRoom, isMobile]);
 
+  // NEW: Enhanced WebSocket connection with auto-reconnect
   const connectWebSocket = (userObj) => {
     try {
       // Close existing connection if any
@@ -764,6 +1231,8 @@ const ChatApp = () => {
       ws.current.onopen = () => {
         console.log('✅ WebSocket connected');
         setIsConnected(true);
+        reconnectAttemptsRef.current = 0;
+        
         // Send auth immediately after connection
         ws.current?.send(JSON.stringify({ type: 'auth', token: userObj.token }));
         
@@ -817,6 +1286,29 @@ const ChatApp = () => {
             case 'connection':
               console.log('🔗 Connection status:', data.message);
               break;
+            // NEW: Handle push notifications
+            case 'pushNotification':
+              if (notificationSettings.notificationsEnabled && !isTabActive) {
+                setPushNotification(data.message);
+                // Auto-remove notification after 5 seconds
+                setTimeout(() => {
+                  setPushNotification(null);
+                }, 5000);
+              }
+              break;
+            // NEW: Handle typing mentions
+            case 'typingMention':
+              if (notificationSettings.mentionNotifications) {
+                setTypingMention(data);
+                // Auto-remove mention after 5 seconds
+                setTimeout(() => {
+                  setTypingMention(null);
+                }, 5000);
+              }
+              break;
+            case 'reconnectSuccess':
+              console.log('🔄 Reconnected successfully');
+              break;
             default:
               console.log('Unknown message type:', data.type);
           }
@@ -829,13 +1321,21 @@ const ChatApp = () => {
         console.log('🔌 WebSocket disconnected', ev);
         setIsConnected(false);
         
-        // Attempt reconnection after 3 seconds
-        setTimeout(() => {
-          if (user) {
-            console.log('🔄 Attempting to reconnect...');
-            connectWebSocket(user);
-          }
-        }, 3000);
+        // Attempt reconnection with exponential backoff
+        if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttemptsRef.current), 30000);
+          reconnectAttemptsRef.current++;
+          
+          console.log(`🔄 Attempting to reconnect in ${delay}ms (attempt ${reconnectAttemptsRef.current})`);
+          
+          setTimeout(() => {
+            if (user) {
+              connectWebSocket(user);
+            }
+          }, delay);
+        } else {
+          console.error('❌ Max reconnection attempts reached');
+        }
       };
 
       ws.current.onerror = (error) => {
@@ -958,14 +1458,16 @@ const ChatApp = () => {
   };
 
   const handleInputChange = (e) => {
-    setInputMessage(e.target.value);
+    const value = e.target.value;
+    setInputMessage(value);
     
     // Start typing indicator
     if (!isTyping && ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({ 
         type: 'typing', 
         typing: true, 
-        room: currentRoom 
+        room: currentRoom,
+        content: value // NEW: Send content for mention detection
       }));
       setIsTyping(true);
     }
@@ -1048,7 +1550,29 @@ const ChatApp = () => {
         overflow: 'hidden',
       }}
     >
-    
+      {/* NEW: Push Notification */}
+      <PushNotification 
+        notification={pushNotification}
+        onClose={() => setPushNotification(null)}
+        isMobile={isMobile}
+      />
+
+      {/* NEW: Typing Mention Notification */}
+      <TypingMentionIndicator 
+        mentionData={typingMention}
+        onClose={() => setTypingMention(null)}
+        isMobile={isMobile}
+      />
+
+      {/* NEW: Notification Settings Modal */}
+      {showNotificationSettings && (
+        <NotificationSettings
+          settings={notificationSettings}
+          onUpdate={updateNotificationSettings}
+          onClose={() => setShowNotificationSettings(false)}
+          isMobile={isMobile}
+        />
+      )}
 
       {/* Media Preview Modal */}
       {showMediaPreview && file && (
@@ -1274,7 +1798,8 @@ const ChatApp = () => {
                 overflowY: 'auto',
               }}
             >
-              {staticUsers.map((staticUser, index) => {
+              {staticUsers.map((staticUser, index) =>
+              {
                 // Find the live status from the users array
                 const liveUser = users.find(u => u.username === staticUser.username);
                 const isUserOnline = liveUser ? getUserStatus(liveUser) === 'online' : false;
