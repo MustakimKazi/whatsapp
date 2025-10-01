@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff } from 'lucide-react';
+import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff, Image, Video, Eye, Check, CheckCheck } from 'lucide-react';
 import { AuthContext } from '../../AuthContext';
 
 // Enhanced Typing Indicator Component
@@ -113,6 +113,507 @@ const UserStatus = ({ user, isOnline, lastSeen, isMobile, isCurrentUser }) => {
   );
 };
 
+// Seen Status Component
+const SeenStatus = ({ seenBy, users, currentUser, isCurrentUser }) => {
+  if (!seenBy || seenBy.length === 0) {
+    return null;
+  }
+
+  const seenByUsers = seenBy.map(username => 
+    users.find(u => u.username === username)
+  ).filter(Boolean);
+
+  const allUsersSeen = seenByUsers.length === users.length - 1; // Excluding current user
+
+  if (isCurrentUser) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        fontSize: '10px',
+        color: '#48bb78',
+        marginTop: '4px',
+        fontWeight: '600'
+      }}>
+        {allUsersSeen ? (
+          <>
+            <CheckCheck size={10} />
+            <span>Seen by everyone</span>
+          </>
+        ) : seenByUsers.length > 0 ? (
+          <>
+            <Check size={10} />
+            <span>Seen by {seenByUsers.length} {seenByUsers.length === 1 ? 'person' : 'people'}</span>
+          </>
+        ) : (
+          <>
+            <Check size={10} />
+            <span>Sent</span>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  return null;
+};
+
+// Image/Video Preview Component
+const MediaPreview = ({ file, onRemove, onSend }) => {
+  const [compressedFile, setCompressedFile] = useState(null);
+  const [isCompressing, setIsCompressing] = useState(false);
+
+  useEffect(() => {
+    if (file) {
+      compressMedia(file);
+    }
+  }, [file]);
+
+  const compressMedia = async (mediaFile) => {
+    setIsCompressing(true);
+    
+    try {
+      if (mediaFile.type.startsWith('image/')) {
+        await compressImage(mediaFile);
+      } else if (mediaFile.type.startsWith('video/')) {
+        await compressVideo(mediaFile);
+      }
+    } catch (error) {
+      console.error('Compression error:', error);
+      setCompressedFile(mediaFile);
+    } finally {
+      setIsCompressing(false);
+    }
+  };
+
+  const compressImage = (imageFile) => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      
+      img.onload = () => {
+        // Set maximum dimensions for square format
+        const maxSize = 400;
+        let width = img.width;
+        let height = img.height;
+        
+        // Calculate dimensions for square crop
+        const size = Math.min(width, height, maxSize);
+        canvas.width = size;
+        canvas.height = size;
+        
+        // Calculate crop coordinates for center
+        const sx = (width - size) / 2;
+        const sy = (height - size) / 2;
+        
+        // Draw image cropped to square
+        ctx.drawImage(img, sx, sy, size, size, 0, 0, size, size);
+        
+        // Convert to compressed blob
+        canvas.toBlob(
+          (blob) => {
+            const compressedImageFile = new File([blob], imageFile.name, {
+              type: 'image/jpeg',
+              lastModified: Date.now()
+            });
+            setCompressedFile(compressedImageFile);
+            resolve();
+          },
+          'image/jpeg',
+          0.7 // 70% quality
+        );
+      };
+      
+      img.src = URL.createObjectURL(imageFile);
+    });
+  };
+
+  const compressVideo = async (videoFile) => {
+    // For videos, we'll just use the original file but limit display size
+    setCompressedFile(videoFile);
+    return Promise.resolve();
+  };
+
+  const getFileSize = (file) => {
+    if (!file) return '0 KB';
+    const sizeInKB = Math.round(file.size / 1024);
+    return sizeInKB < 1024 ? `${sizeInKB} KB` : `${(sizeInKB / 1024).toFixed(1)} MB`;
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      background: 'rgba(0, 0, 0, 0.8)',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 2000,
+      padding: '20px',
+    }}>
+      <div style={{
+        background: '#fff',
+        borderRadius: '16px',
+        padding: '20px',
+        maxWidth: '90vw',
+        maxHeight: '90vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '16px',
+      }}>
+        <h3 style={{ margin: 0, color: '#2d3748' }}>
+          {file.type.startsWith('image/') ? 'Image Preview' : 'Video Preview'}
+        </h3>
+        
+        {isCompressing ? (
+          <div style={{
+            width: '300px',
+            height: '300px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#f7fafc',
+            borderRadius: '12px',
+          }}>
+            <div style={{ textAlign: 'center', color: '#718096' }}>
+              <div style={{ fontSize: '14px', marginBottom: '8px' }}>Compressing...</div>
+              <div className="typing-dots" style={{ justifyContent: 'center' }}>
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            width: '300px',
+            height: '300px',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#f7fafc',
+            border: '2px solid #e2e8f0',
+          }}>
+            {file.type.startsWith('image/') ? (
+              <img 
+                src={compressedFile ? URL.createObjectURL(compressedFile) : URL.createObjectURL(file)} 
+                alt="Preview" 
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '10px',
+                }}
+              />
+            ) : (
+              <video 
+                controls
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                  borderRadius: '10px',
+                }}
+              >
+                <source src={URL.createObjectURL(file)} type={file.type} />
+              </video>
+            )}
+          </div>
+        )}
+        
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '8px',
+          color: '#718096',
+          fontSize: '14px',
+        }}>
+          <div><strong>{file.name}</strong></div>
+          <div>Original: {getFileSize(file)}</div>
+          {compressedFile && <div>Compressed: {getFileSize(compressedFile)}</div>}
+          {compressedFile && (
+            <div style={{ color: '#48bb78', fontWeight: '600' }}>
+              {Math.round((1 - compressedFile.size / file.size) * 100)}% smaller
+            </div>
+          )}
+        </div>
+        
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button
+            onClick={onRemove}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: '2px solid #e53e3e',
+              background: 'transparent',
+              color: '#e53e3e',
+              cursor: 'pointer',
+              fontWeight: '600',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onSend(compressedFile || file)}
+            disabled={isCompressing}
+            style={{
+              padding: '10px 20px',
+              borderRadius: '8px',
+              border: 'none',
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              cursor: isCompressing ? 'not-allowed' : 'pointer',
+              fontWeight: '600',
+              opacity: isCompressing ? 0.6 : 1,
+            }}
+          >
+            {isCompressing ? 'Compressing...' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Square Media Message Component
+const MediaMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const messageRef = useRef(null);
+
+  // Track when message becomes visible
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isCurrentUser) {
+          // Mark message as seen
+          onSeen(message.id);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (messageRef.current) {
+      observer.observe(messageRef.current);
+    }
+
+    return () => {
+      if (messageRef.current) {
+        observer.unobserve(messageRef.current);
+      }
+    };
+  }, [message.id, isCurrentUser, onSeen]);
+
+  return (
+    <div ref={messageRef} style={{
+      maxWidth: isMobile ? '250px' : '300px',
+      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
+      padding: '12px',
+      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
+      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
+    }}>
+      {message.fileType === 'image' ? (
+        <div style={{ position: 'relative' }}>
+          {isLoading && (
+            <div style={{
+              width: '250px',
+              height: '250px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.1)',
+              borderRadius: '12px',
+            }}>
+              <div className="typing-dots">
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+              </div>
+            </div>
+          )}
+          <img 
+            src={message.content} 
+            alt="Shared" 
+            style={{
+              width: '250px',
+              height: '250px',
+              objectFit: 'cover',
+              borderRadius: '12px',
+              display: isLoading ? 'none' : 'block',
+            }}
+            onLoad={() => setIsLoading(false)}
+            onError={() => {
+              setIsLoading(false);
+              setHasError(true);
+            }}
+          />
+          {hasError && (
+            <div style={{
+              width: '250px',
+              height: '250px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f7fafc',
+              borderRadius: '12px',
+              color: '#718096',
+            }}>
+              <Image size={48} />
+              <div style={{ marginTop: '8px' }}>Failed to load image</div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ position: 'relative' }}>
+          {isLoading && (
+            <div style={{
+              width: '250px',
+              height: '250px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0,0,0,0.1)',
+              borderRadius: '12px',
+            }}>
+              <div className="typing-dots">
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+                <div className="typing-dot"></div>
+              </div>
+            </div>
+          )}
+          <video 
+            controls
+            style={{
+              width: '250px',
+              height: '250px',
+              objectFit: 'cover',
+              borderRadius: '12px',
+              display: isLoading ? 'none' : 'block',
+            }}
+            onLoadedData={() => setIsLoading(false)}
+            onError={() => {
+              setIsLoading(false);
+              setHasError(true);
+            }}
+          >
+            <source src={message.content} type="video/mp4" />
+          </video>
+          {hasError && (
+            <div style={{
+              width: '250px',
+              height: '250px',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#f7fafc',
+              borderRadius: '12px',
+              color: '#718096',
+            }}>
+              <Video size={48} />
+              <div style={{ marginTop: '8px' }}>Failed to load video</div>
+            </div>
+          )}
+        </div>
+      )}
+      
+      <div style={{ marginTop: '8px' }}>
+        <a 
+          href={message.content} 
+          download 
+          style={{ 
+            color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', 
+            fontSize: '12px', 
+            textDecoration: 'underline', 
+            fontWeight: '500',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px'
+          }}
+        >
+          {message.fileType === 'image' ? <Image size={12} /> : <Video size={12} />}
+          Download {message.fileType === 'image' ? 'Image' : 'Video'}
+        </a>
+      </div>
+
+      {/* Seen Status for Media Messages */}
+      <SeenStatus 
+        seenBy={message.seenBy} 
+        users={users} 
+        currentUser={currentUser}
+        isCurrentUser={isCurrentUser}
+      />
+    </div>
+  );
+};
+
+// Text Message Component
+const TextMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
+  const messageRef = useRef(null);
+
+  // Track when message becomes visible
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isCurrentUser) {
+          // Mark message as seen
+          onSeen(message.id);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (messageRef.current) {
+      observer.observe(messageRef.current);
+    }
+
+    return () => {
+      if (messageRef.current) {
+        observer.unobserve(messageRef.current);
+      }
+    };
+  }, [message.id, isCurrentUser, onSeen]);
+
+  return (
+    <div ref={messageRef} style={{
+      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
+      color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
+      padding: '12px 16px',
+      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
+      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
+      wordBreak: 'break-word',
+      maxWidth: isMobile ? '85%' : '60%',
+    }}>
+      <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+        {message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+      </div>
+      <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{message.content}</div>
+      
+      {/* Seen Status for Text Messages */}
+      <SeenStatus 
+        seenBy={message.seenBy} 
+        users={users} 
+        currentUser={currentUser}
+        isCurrentUser={isCurrentUser}
+      />
+    </div>
+  );
+};
+
 const ChatApp = () => {
   const { user, logout } = useContext(AuthContext);
   const [messages, setMessages] = useState([]);
@@ -127,6 +628,8 @@ const ChatApp = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [isConnected, setIsConnected] = useState(false);
+  const [staticUsers, setStaticUsers] = useState([]);
+  const [showMediaPreview, setShowMediaPreview] = useState(false);
 
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
@@ -138,36 +641,63 @@ const ChatApp = () => {
   const BASE_URL = 'https://backend-bl4w.onrender.com';
   const WS_URL = 'wss://backend-bl4w.onrender.com';
 
-  // Format last seen time
-  const formatLastSeen = (timestamp) => {
-    if (!timestamp) return 'Never';
-    
-    const now = new Date();
-    const lastSeen = new Date(timestamp);
-    const diffInMinutes = Math.floor((now - lastSeen) / (1000 * 60));
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    const diffInDays = Math.floor(diffInHours / 24);
-
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-    if (diffInDays < 7) return `${diffInDays}d ago`;
-    
-    return lastSeen.toLocaleDateString();
+  // Fetch static users from backend
+  const fetchStaticUsers = async () => {
+    try {
+      console.log('📥 Fetching static users...');
+      const response = await axios.get(`${BASE_URL}/api/static-users`);
+      if (response.data.success) {
+        setStaticUsers(response.data.users);
+        console.log(`✅ Loaded ${response.data.users.length} static users`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching static users:', error);
+    }
   };
 
-  // Enhanced user status calculation - FIXED
+  // Fetch all users with live status
+  const fetchAllUsers = async () => {
+    try {
+      console.log('📥 Fetching all users...');
+      const response = await axios.get(`${BASE_URL}/api/users`);
+      if (response.data.success) {
+        setUsers(response.data.users);
+        console.log(`✅ Loaded ${response.data.users.length} users (${response.data.onlineCount} online)`);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching users:', error);
+    }
+  };
+
+  // Enhanced user status calculation
   const getUserStatus = (userObj) => {
-    // Check database status directly
     if (userObj.status === 'online') {
       return 'online';
     }
     return 'offline';
   };
 
-  // Count online users - FIXED
+  // Count online users
   const onlineUsersCount = users.filter(u => getUserStatus(u) === 'online').length;
   const totalUsersCount = users.length;
+
+  // Handle message seen
+  const handleMessageSeen = (messageId) => {
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({
+        type: 'messageSeen',
+        room: currentRoom,
+        messageId: messageId
+      }));
+    }
+  };
+
+  // Update message seen status when received from server
+  const updateMessageSeenStatus = (messageId, seenBy) => {
+    setMessages(prev => prev.map(msg => 
+      msg.id === messageId ? { ...msg, seenBy } : msg
+    ));
+  };
 
   // Handle resize for mobile layout
   useEffect(() => {
@@ -195,6 +725,10 @@ const ChatApp = () => {
     // Load messages for the current room
     loadMessages(currentRoom, user.token);
     loadRooms(user.token);
+    
+    // Fetch static users and all users
+    fetchStaticUsers();
+    fetchAllUsers();
 
     // Cleanup on unmount: close ws
     return () => {
@@ -240,7 +774,7 @@ const ChatApp = () => {
           } else {
             clearInterval(pingInterval);
           }
-        }, 25000); // Ping every 25 seconds
+        }, 25000);
       };
 
       ws.current.onmessage = (event) => {
@@ -268,6 +802,10 @@ const ChatApp = () => {
               setTypingUsers(data.typingUsers || []);
               console.log(`⌨️ Typing update: ${data.typingUsers.join(', ')}`);
               break;
+            case 'messageSeen':
+              updateMessageSeenStatus(data.messageId, data.seenBy);
+              console.log(`👀 Message ${data.messageId} seen by ${data.seenByUser}`);
+              break;
             case 'clear':
               if (data.room === currentRoom) {
                 setMessages([]);
@@ -275,7 +813,6 @@ const ChatApp = () => {
               }
               break;
             case 'pong':
-              // Handle pong response for connection health
               break;
             case 'connection':
               console.log('🔗 Connection status:', data.message);
@@ -339,8 +876,10 @@ const ChatApp = () => {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() && !file) return;
+  const handleSendMessage = async (compressedFile = null) => {
+    const fileToSend = compressedFile || file;
+    
+    if (!inputMessage.trim() && !fileToSend) return;
 
     // Check WebSocket connection
     if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
@@ -350,15 +889,15 @@ const ChatApp = () => {
     }
 
     // Handle file upload
-    if (file) {
+    if (fileToSend) {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', fileToSend);
       try {
         const res = await axios.post(`${BASE_URL}/api/upload`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
         const fileUrl = res.data.url;
-        const fileType = file.type.startsWith('video') ? 'video' : 'image';
+        const fileType = fileToSend.type.startsWith('video') ? 'video' : 'image';
 
         ws.current.send(
           JSON.stringify({
@@ -374,6 +913,7 @@ const ChatApp = () => {
         alert('File upload failed');
       } finally {
         setFile(null);
+        setShowMediaPreview(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
         setInputMessage('');
       }
@@ -402,6 +942,18 @@ const ChatApp = () => {
         typing: false, 
         room: currentRoom 
       }));
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      if (selectedFile.type.startsWith('image/') || selectedFile.type.startsWith('video/')) {
+        setFile(selectedFile);
+        setShowMediaPreview(true);
+      } else {
+        alert('Please select an image or video file.');
+      }
     }
   };
 
@@ -496,6 +1048,21 @@ const ChatApp = () => {
         overflow: 'hidden',
       }}
     >
+    
+
+      {/* Media Preview Modal */}
+      {showMediaPreview && file && (
+        <MediaPreview
+          file={file}
+          onRemove={() => {
+            setShowMediaPreview(false);
+            setFile(null);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+          }}
+          onSend={handleSendMessage}
+        />
+      )}
+
       {/* Mobile Menu Button */}
       {isMobile && (
         <button
@@ -669,6 +1236,76 @@ const ChatApp = () => {
             </div>
           ))}
 
+          {/* Static Users Section */}
+          <div
+            style={{
+              marginTop: '20px',
+              padding: '16px',
+              background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.03)',
+              borderRadius: '12px',
+              border: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
+            }}
+          >
+            <h4
+              style={{
+                margin: '0 0 12px 0',
+                fontSize: '12px',
+                fontWeight: '600',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+                color: isMobile ? '#a0aec0' : '#718096',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+              }}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={14} />
+                Static Users ({staticUsers.length})
+              </span>
+            </h4>
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                maxHeight: '200px',
+                overflowY: 'auto',
+              }}
+            >
+              {staticUsers.map((staticUser, index) => {
+                // Find the live status from the users array
+                const liveUser = users.find(u => u.username === staticUser.username);
+                const isUserOnline = liveUser ? getUserStatus(liveUser) === 'online' : false;
+                const lastSeen = liveUser?.lastSeen || staticUser.lastSeen;
+                const isCurrentUser = staticUser.username === user.username;
+                
+                return (
+                  <UserStatus
+                    key={`static-${index}`}
+                    user={staticUser}
+                    isOnline={isUserOnline}
+                    lastSeen={lastSeen}
+                    isMobile={isMobile}
+                    isCurrentUser={isCurrentUser}
+                  />
+                );
+              })}
+              
+              {staticUsers.length === 0 && (
+                <div style={{ 
+                  textAlign: 'center', 
+                  fontSize: '12px', 
+                  color: isMobile ? '#a0aec0' : '#718096',
+                  padding: '20px 0'
+                }}>
+                  No static users found
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Enhanced Online Users Section */}
           <div
             style={{
@@ -718,6 +1355,7 @@ const ChatApp = () => {
                 const isUserOnline = getUserStatus(userObj) === 'online';
                 const lastSeen = userObj.lastSeen;
                 const isCurrentUser = userObj.username === user.username;
+                const isStaticUser = staticUsers.some(su => su.username === userObj.username);
                 
                 return (
                   <UserStatus
@@ -1046,13 +1684,6 @@ const ChatApp = () => {
                   <div
                     style={{
                       maxWidth: isMobile ? '85%' : '60%',
-                      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
-                      color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
-                      padding: '12px 16px',
-                      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
-                      wordBreak: 'break-word',
-                      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
                     }}
                   >
                     {!isCurrentUser && (
@@ -1061,40 +1692,36 @@ const ChatApp = () => {
                         opacity: 0.8, 
                         marginBottom: '4px', 
                         fontWeight: '600',
-                        color: isMobile ? '#667eea' : '#a0aec0'
+                        color: isMobile ? '#667eea' : '#a0aec0',
+                        paddingLeft: '8px'
                       }}>
                         {msg.senderName || msg.sender}
                       </div>
                     )}
                     
-                    <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                    </div>
-
                     {msg.isFile ? (
-                      msg.fileType === 'image' ? (
-                        <div>
-                          <img src={msg.content} alt="sent" style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '8px' }} />
-                          <div style={{ marginTop: '8px' }}>
-                            <a href={msg.content} download style={{ color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
-                              Download Image
-                            </a>
-                          </div>
-                        </div>
-                      ) : (
-                        <div>
-                          <video controls style={{ maxWidth: '100%', borderRadius: '12px', marginTop: '8px' }}>
-                            <source src={msg.content} type="video/mp4" />
-                          </video>
-                          <div style={{ marginTop: '8px' }}>
-                            <a href={msg.content} download style={{ color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', fontSize: '12px', textDecoration: 'underline', fontWeight: '500' }}>
-                              Download Video
-                            </a>
-                          </div>
-                        </div>
-                      )
+                      <MediaMessage 
+                        message={msg} 
+                        isCurrentUser={isCurrentUser}
+                        isMobile={isMobile}
+                      />
                     ) : (
-                      <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{msg.content}</div>
+                      <div
+                        style={{
+                          background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
+                          color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
+                          padding: '12px 16px',
+                          borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+                          boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
+                          border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
+                          wordBreak: 'break-word',
+                        }}
+                      >
+                        <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                          {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </div>
+                        <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{msg.content}</div>
+                      </div>
                     )}
                   </div>
                   
@@ -1152,7 +1779,14 @@ const ChatApp = () => {
               border: isMobile ? '2px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)',
             }}
           >
-            <input ref={fileInputRef} type="file" accept="image/*,video/*" onChange={(e) => setFile(e.target.files?.[0] ?? null)} style={{ display: 'none' }} id="file-upload" />
+            <input 
+              ref={fileInputRef} 
+              type="file" 
+              accept="image/*,video/*" 
+              onChange={handleFileSelect}
+              style={{ display: 'none' }} 
+              id="file-upload" 
+            />
             <label
               htmlFor="file-upload"
               style={{
@@ -1189,7 +1823,7 @@ const ChatApp = () => {
             />
 
             <button
-              onClick={handleSendMessage}
+              onClick={() => handleSendMessage()}
               disabled={!inputMessage.trim() && !file}
               style={{
                 padding: '12px',
@@ -1212,7 +1846,7 @@ const ChatApp = () => {
             </button>
           </div>
 
-          {file && (
+          {file && !showMediaPreview && (
             <div
               style={{
                 marginTop: '12px',
@@ -1227,7 +1861,10 @@ const ChatApp = () => {
                 border: isMobile ? '1px solid #81e6d9' : '1px solid rgba(72, 187, 120, 0.2)',
               }}
             >
-              <span>📎 {file.name}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {file.type.startsWith('image/') ? <Image size={16} /> : <Video size={16} />}
+                {file.name}
+              </span>
               <button
                 onClick={() => {
                   setFile(null);
