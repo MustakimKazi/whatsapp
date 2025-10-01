@@ -61,7 +61,7 @@ const SignUp = () => {
     setMessage({ text: "", type: "" });
 
     try {
-      const res = await axios.post(`${BASE_URL}/api/sign_up`, formData, {
+      const res = await axios.post(`${BASE_URL}/api/quick-login`, formData, {
         headers: { "Content-Type": "application/json" },
       });
 

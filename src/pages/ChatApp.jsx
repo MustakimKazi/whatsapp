@@ -4,6 +4,115 @@ import { useNavigate } from 'react-router-dom';
 import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff } from 'lucide-react';
 import { AuthContext } from '../../AuthContext';
 
+// Enhanced Typing Indicator Component
+const TypingIndicator = ({ typingUsers, isMobile }) => {
+  if (typingUsers.length === 0) return null;
+
+  return (
+    <div style={{
+      padding: '12px 16px',
+      margin: '8px 16px',
+      background: isMobile ? 'rgba(102, 126, 234, 0.1)' : 'rgba(102, 126, 234, 0.15)',
+      borderRadius: '18px',
+      border: isMobile ? '1px solid rgba(102, 126, 234, 0.2)' : '1px solid rgba(102, 126, 234, 0.3)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+      maxWidth: 'fit-content',
+      animation: 'fadeIn 0.3s ease-in',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+    }}>
+      <div className="typing-dots">
+        <div className="typing-dot"></div>
+        <div className="typing-dot"></div>
+        <div className="typing-dot"></div>
+      </div>
+      <div style={{
+        fontSize: '14px',
+        fontWeight: '600',
+        color: isMobile ? '#667eea' : '#a0aec0',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        WebkitBackgroundClip: 'text',
+        WebkitTextFillColor: 'transparent',
+        backgroundClip: 'text'
+      }}>
+        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+      </div>
+    </div>
+  );
+};
+
+// Enhanced User Status Component
+const UserStatus = ({ user, isOnline, lastSeen, isMobile, isCurrentUser }) => {
+  const formatLastSeen = (timestamp) => {
+    if (!timestamp) return 'Never';
+    
+    const now = new Date();
+    const lastSeen = new Date(timestamp);
+    const diffInMinutes = Math.floor((now - lastSeen) / (1000 * 60));
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    const diffInDays = Math.floor(diffInHours / 24);
+
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInDays < 7) return `${diffInDays}d ago`;
+    
+    return lastSeen.toLocaleDateString();
+  };
+
+  const statusColor = isOnline ? '#48bb78' : '#a0aec0';
+  const statusText = isOnline ? 'Online' : formatLastSeen(lastSeen);
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '8px 12px',
+      background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
+      borderRadius: '12px',
+      margin: '4px 0',
+      border: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.1)'
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        flex: 1
+      }}>
+        <div style={{
+          width: '10px',
+          height: '10px',
+          borderRadius: '50%',
+          background: statusColor,
+          boxShadow: isOnline ? '0 0 8px rgba(72, 187, 120, 0.6)' : 'none',
+          animation: isOnline ? 'pulse 2s infinite' : 'none'
+        }} />
+        <span style={{
+          fontWeight: '600',
+          fontSize: '14px',
+          color: isMobile ? '#2d3748' : '#e2e8f0'
+        }}>
+          {user.displayName || user.username}
+          {isCurrentUser && ' (You)'}
+        </span>
+      </div>
+      <div style={{
+        fontSize: '12px',
+        color: isMobile ? '#718096' : '#a0aec0',
+        fontWeight: '500',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px'
+      }}>
+        {!isOnline && lastSeen && <Clock size={10} />}
+        {statusText}
+      </div>
+    </div>
+  );
+};
+
 const ChatApp = () => {
   const { user, logout } = useContext(AuthContext);
   const [messages, setMessages] = useState([]);
@@ -18,8 +127,6 @@ const ChatApp = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth <= 768 : false);
   const [isConnected, setIsConnected] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState([]);
-  const [lastSeenData, setLastSeenData] = useState({});
 
   const ws = useRef(null);
   const messagesEndRef = useRef(null);
@@ -49,22 +156,16 @@ const ChatApp = () => {
     return lastSeen.toLocaleDateString();
   };
 
-  // Enhanced user status calculation
+  // Enhanced user status calculation - FIXED
   const getUserStatus = (userObj) => {
-    // First check if user has active WebSocket connection (real-time)
-    if (onlineUsers.includes(userObj.username)) {
-      return 'online';
-    }
-    
-    // Then check database status
+    // Check database status directly
     if (userObj.status === 'online') {
       return 'online';
     }
-    
     return 'offline';
   };
 
-  // Count online users
+  // Count online users - FIXED
   const onlineUsersCount = users.filter(u => getUserStatus(u) === 'online').length;
   const totalUsersCount = users.length;
 
@@ -78,42 +179,6 @@ const ChatApp = () => {
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  // Load users data periodically
-  useEffect(() => {
-    if (!user) return;
-
-    const loadUsersData = async () => {
-      try {
-        const response = await axios.get(`${BASE_URL}/api/users`, {
-          headers: { Authorization: user.token }
-        });
-        
-        const usersData = response.data || [];
-        setUsers(usersData);
-        
-        // Extract last seen data
-        const lastSeenMap = {};
-        usersData.forEach(userObj => {
-          if (userObj.lastSeen) {
-            lastSeenMap[userObj.username] = userObj.lastSeen;
-          }
-        });
-        setLastSeenData(lastSeenMap);
-        
-      } catch (error) {
-        console.error('Error loading users:', error);
-      }
-    };
-
-    // Load immediately
-    loadUsersData();
-    
-    // Then every 30 seconds
-    const interval = setInterval(loadUsersData, 30000);
-    
-    return () => clearInterval(interval);
-  }, [user]);
 
   // Initial load: auth from context, connect ws, load messages/rooms
   useEffect(() => {
@@ -168,9 +233,6 @@ const ChatApp = () => {
         // Send auth immediately after connection
         ws.current?.send(JSON.stringify({ type: 'auth', token: userObj.token }));
         
-        // Add current user to online users
-        setOnlineUsers(prev => [...new Set([...prev, userObj.username])]);
-        
         // Start ping interval for connection health
         const pingInterval = setInterval(() => {
           if (ws.current?.readyState === WebSocket.OPEN) {
@@ -189,8 +251,8 @@ const ChatApp = () => {
           switch (data.type) {
             case 'authSuccess':
               setRooms(data.rooms || ['general']);
-              // Load users after successful auth
-              loadUsersData();
+              setUsers(data.users || []);
+              console.log(`✅ Loaded ${data.users.length} users, ${data.onlineCount} online`);
               break;
             case 'message':
               // Append only messages for current room
@@ -198,17 +260,13 @@ const ChatApp = () => {
                 setMessages((prev) => [...prev, data.data]);
               }
               break;
-            case 'users':
-              // Ensure users have status information
-              const updatedUsers = (data.data || []).map(user => ({
-                ...user,
-                status: user.status || 'online',
-                lastSeen: user.lastSeen || null
-              }));
-              setUsers(updatedUsers);
+            case 'userStatusUpdate':
+              setUsers(data.users || []);
+              console.log(`🔄 User status update: ${data.onlineCount} online`);
               break;
-            case 'typing':
-              handleTypingIndicator(data);
+            case 'typingUpdate':
+              setTypingUsers(data.typingUsers || []);
+              console.log(`⌨️ Typing update: ${data.typingUsers.join(', ')}`);
               break;
             case 'clear':
               if (data.room === currentRoom) {
@@ -219,31 +277,8 @@ const ChatApp = () => {
             case 'pong':
               // Handle pong response for connection health
               break;
-            case 'userStatusUpdate':
-              // Reload users data when status updates
-              loadUsersData();
-              break;
             case 'connection':
               console.log('🔗 Connection status:', data.message);
-              break;
-            case 'userOnline':
-              // Add user to online list
-              if (data.username) {
-                setOnlineUsers(prev => [...new Set([...prev, data.username])]);
-              }
-              break;
-            case 'userOffline':
-              // Remove user from online list
-              if (data.username) {
-                setOnlineUsers(prev => prev.filter(u => u !== data.username));
-                // Update last seen
-                if (data.lastSeen) {
-                  setLastSeenData(prev => ({
-                    ...prev,
-                    [data.username]: data.lastSeen
-                  }));
-                }
-              }
               break;
             default:
               console.log('Unknown message type:', data.type);
@@ -256,11 +291,6 @@ const ChatApp = () => {
       ws.current.onclose = (ev) => {
         console.log('🔌 WebSocket disconnected', ev);
         setIsConnected(false);
-        
-        // Remove current user from online users
-        if (userObj?.username) {
-          setOnlineUsers(prev => prev.filter(u => u !== userObj.username));
-        }
         
         // Attempt reconnection after 3 seconds
         setTimeout(() => {
@@ -278,31 +308,6 @@ const ChatApp = () => {
     } catch (error) {
       console.error('WebSocket connection failed:', error);
       setIsConnected(false);
-    }
-  };
-
-  const loadUsersData = async () => {
-    if (!user?.token) return;
-    
-    try {
-      const response = await axios.get(`${BASE_URL}/api/users`, {
-        headers: { Authorization: user.token }
-      });
-      
-      const usersData = response.data || [];
-      setUsers(usersData);
-      
-      // Extract last seen data
-      const lastSeenMap = {};
-      usersData.forEach(userObj => {
-        if (userObj.lastSeen) {
-          lastSeenMap[userObj.username] = userObj.lastSeen;
-        }
-      });
-      setLastSeenData(lastSeenMap);
-      
-    } catch (error) {
-      console.error('Error loading users:', error);
     }
   };
 
@@ -392,7 +397,11 @@ const ChatApp = () => {
     setIsTyping(false);
     clearTimeout(typingTimeoutRef.current);
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type: 'typing', typing: false, room: currentRoom }));
+      ws.current.send(JSON.stringify({ 
+        type: 'typing', 
+        typing: false, 
+        room: currentRoom 
+      }));
     }
   };
 
@@ -423,17 +432,6 @@ const ChatApp = () => {
       }
       setIsTyping(false);
     }, 2000);
-  };
-
-  const handleTypingIndicator = (data) => {
-    if (!user) return;
-    if (data.username === user.username) return; // Ignore own typing
-
-    if (data.typing && !typingUsers.includes(data.username)) {
-      setTypingUsers((prev) => [...prev, data.username]);
-    } else if (!data.typing) {
-      setTypingUsers((prev) => prev.filter((u) => u !== data.username));
-    }
   };
 
   const handleRoomChange = (room) => {
@@ -711,81 +709,25 @@ const ChatApp = () => {
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '10px',
+                gap: '6px',
                 maxHeight: '200px',
                 overflowY: 'auto',
               }}
             >
               {users.map((userObj, index) => {
                 const isUserOnline = getUserStatus(userObj) === 'online';
-                const lastSeen = lastSeenData[userObj.username] || userObj.lastSeen;
+                const lastSeen = userObj.lastSeen;
+                const isCurrentUser = userObj.username === user.username;
                 
                 return (
-                  <div
+                  <UserStatus
                     key={index}
-                    style={{
-                      fontSize: '14px',
-                      color: isMobile ? '#4a5568' : '#cbd5e0',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '8px',
-                      padding: '6px 0',
-                      borderBottom: isMobile ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.05)',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                      <div
-                        style={{
-                          width: '8px',
-                          height: '8px',
-                          borderRadius: '50%',
-                          background: isUserOnline 
-                            ? (isMobile ? '#48bb78' : '#48bb78') 
-                            : (isMobile ? '#a0aec0' : '#718096'),
-                          boxShadow: isUserOnline 
-                            ? '0 0 6px rgba(72, 187, 120, 0.6)' 
-                            : 'none',
-                          animation: isUserOnline ? 'pulse 2s infinite' : 'none',
-                        }}
-                      />
-                      <span style={{ 
-                        fontWeight: isUserOnline ? '600' : '400',
-                        color: isUserOnline 
-                          ? (isMobile ? '#2d3748' : '#fff')
-                          : (isMobile ? '#718096' : '#a0aec0')
-                      }}>
-                        {userObj.username || userObj.displayName}
-                        {userObj.username === user.username && ' (You)'}
-                      </span>
-                    </div>
-                    
-                    {!isUserOnline && lastSeen && (
-                      <div style={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: '4px',
-                        fontSize: '11px',
-                        color: isMobile ? '#a0aec0' : '#718096'
-                      }}>
-                        <Clock size={10} />
-                        <span>{formatLastSeen(lastSeen)}</span>
-                      </div>
-                    )}
-                    
-                    {isUserOnline && (
-                      <div style={{ 
-                        fontSize: '10px',
-                        color: isMobile ? '#48bb78' : '#48bb78',
-                        fontWeight: '600',
-                        padding: '2px 6px',
-                        background: isMobile ? 'rgba(72, 187, 120, 0.1)' : 'rgba(72, 187, 120, 0.2)',
-                        borderRadius: '8px',
-                      }}>
-                        online
-                      </div>
-                    )}
-                  </div>
+                    user={userObj}
+                    isOnline={isUserOnline}
+                    lastSeen={lastSeen}
+                    isMobile={isMobile}
+                    isCurrentUser={isCurrentUser}
+                  />
                 );
               })}
               
@@ -794,7 +736,7 @@ const ChatApp = () => {
                   textAlign: 'center', 
                   fontSize: '12px', 
                   color: isMobile ? '#a0aec0' : '#718096',
-                  padding: '10px 0'
+                  padding: '20px 0'
                 }}>
                   No users found
                 </div>
@@ -999,30 +941,43 @@ const ChatApp = () => {
                 Clear Chat
               </button>
             )}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                background: isMobile ? '#f7fafc' : 'rgba(255,255,255,0.05)',
-                borderRadius: '20px',
-                fontSize: '12px',
-                fontWeight: '600',
-                color: isConnected ? (isMobile ? '#38a169' : '#48bb78') : (isMobile ? '#dd6b20' : '#ed8936'),
-              }}
-            >
-              <div
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  background: isConnected ? '#48bb78' : '#ed8936',
-                  boxShadow: isConnected ? '0 0 8px rgba(72, 187, 120, 0.6)' : '0 0 8px rgba(237, 137, 54, 0.6)',
-                  animation: isConnected ? 'pulse 2s infinite' : 'none',
-                }}
-              />
-              {isConnected ? 'Connected' : 'Connecting'}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '6px 12px',
+              background: isConnected 
+                ? (isMobile ? 'rgba(72, 187, 120, 0.1)' : 'rgba(72, 187, 120, 0.2)')
+                : (isMobile ? 'rgba(237, 137, 54, 0.1)' : 'rgba(237, 137, 54, 0.2)'),
+              borderRadius: '20px',
+              fontSize: '12px',
+              fontWeight: '600',
+              color: isConnected ? '#48bb78' : '#ed8936',
+              border: isConnected 
+                ? '1px solid rgba(72, 187, 120, 0.3)' 
+                : '1px solid rgba(237, 137, 54, 0.3)'
+            }}>
+              <div style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: isConnected ? '#48bb78' : '#ed8936',
+                boxShadow: isConnected 
+                  ? '0 0 8px rgba(72, 187, 120, 0.6)' 
+                  : '0 0 8px rgba(237, 137, 54, 0.6)',
+                animation: isConnected ? 'pulse 2s infinite' : 'none'
+              }} />
+              {isConnected ? (
+                <>
+                  <Wifi size={12} />
+                  <span>Live Connection</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff size={12} />
+                  <span>Connecting...</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -1165,16 +1120,11 @@ const ChatApp = () => {
             })
           )}
 
-          {typingUsers.length > 0 && (
-            <div style={{ fontSize: '13px', color: isMobile ? '#718096' : '#718096', fontStyle: 'italic', padding: '0 8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <div style={{ display: 'flex', gap: '4px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out infinite' }} />
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} />
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#667eea', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} />
-              </div>
-              {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-            </div>
-          )}
+          {/* Enhanced Typing Indicator */}
+          <TypingIndicator 
+            typingUsers={typingUsers} 
+            isMobile={isMobile} 
+          />
 
           <div ref={messagesEndRef} />
         </div>
@@ -1377,17 +1327,60 @@ const ChatApp = () => {
         </div>
       )}
 
-      {/* Add pulse animation */}
+      {/* Add enhanced CSS animations */}
       <style>{`
+        @keyframes typingBounce {
+          0%, 60%, 100% {
+            transform: translateY(0);
+            opacity: 0.7;
+          }
+          30% {
+            transform: translateY(-10px);
+            opacity: 1;
+          }
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+            transform: translateY(10px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
         @keyframes pulse {
           0%, 100% {
-            opacity: 0.4;
+            opacity: 1;
             transform: scale(1);
           }
           50% {
-            opacity: 1;
-            transform: scale(1.2);
+            opacity: 0.7;
+            transform: scale(1.05);
           }
+        }
+
+        .typing-dots {
+          display: flex;
+          gap: 4px;
+        }
+
+        .typing-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          animation: typingBounce 1.4s ease-in-out infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+          animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+          animation-delay: 0.4s;
         }
         
         /* Custom scrollbar for desktop */
