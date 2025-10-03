@@ -159,6 +159,457 @@ const SeenStatus = ({ seenBy, users, currentUser, isCurrentUser }) => {
   return null;
 };
 
+// Enhanced Avatar Component
+const UserAvatar = ({ user, size = 32, isOnline = false, showStatus = true }) => {
+  return (
+    <div style={{
+      position: 'relative',
+      width: size,
+      height: size,
+    }}>
+      <div style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'white',
+        fontSize: Math.max(12, size * 0.4),
+        fontWeight: 'bold',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+      }}>
+        {(user.displayName || user.username || 'U').charAt(0).toUpperCase()}
+      </div>
+      {showStatus && isOnline && (
+        <div style={{
+          position: 'absolute',
+          bottom: -2,
+          right: -2,
+          width: Math.max(10, size * 0.3),
+          height: Math.max(10, size * 0.3),
+          borderRadius: '50%',
+          background: '#48bb78',
+          border: '2px solid white',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+        }} />
+      )}
+    </div>
+  );
+};
+
+// Enhanced Text Message Component
+const TextMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
+  const messageRef = useRef(null);
+
+  // Track when message becomes visible
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isCurrentUser) {
+          onSeen(message.id);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (messageRef.current) {
+      observer.observe(messageRef.current);
+    }
+
+    return () => {
+      if (messageRef.current) {
+        observer.unobserve(messageRef.current);
+      }
+    };
+  }, [message.id, isCurrentUser, onSeen]);
+
+  return (
+    <div ref={messageRef} style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: isCurrentUser ? 'flex-end' : 'flex-start',
+      marginBottom: '16px',
+      maxWidth: isMobile ? '90%' : '70%',
+      alignSelf: isCurrentUser ? 'flex-end' : 'flex-start',
+    }}>
+      {/* Sender name for received messages */}
+      {!isCurrentUser && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '4px',
+          paddingLeft: '12px',
+        }}>
+          <span style={{
+            fontSize: '12px',
+            fontWeight: '600',
+            color: isMobile ? '#667eea' : '#a0aec0',
+            textTransform: 'capitalize',
+          }}>
+            {message.senderName || message.sender}
+          </span>
+        </div>
+      )}
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: '8px',
+        flexDirection: isCurrentUser ? 'row-reverse' : 'row',
+      }}>
+        {/* Avatar for received messages */}
+        {!isCurrentUser && (
+          <UserAvatar 
+            user={{ displayName: message.senderName, username: message.sender }} 
+            size={32}
+            isOnline={true}
+            showStatus={false}
+          />
+        )}
+
+        {/* Message Bubble */}
+        <div style={{
+          background: isCurrentUser 
+            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+            : isMobile 
+            ? '#ffffff' 
+            : 'rgba(255,255,255,0.1)',
+          color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
+          padding: '12px 16px',
+          borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+          boxShadow: isCurrentUser 
+            ? '0 4px 15px rgba(102, 126, 234, 0.3)' 
+            : isMobile 
+            ? '0 2px 12px rgba(0,0,0,0.1)' 
+            : '0 4px 15px rgba(0,0,0,0.2)',
+          border: isMobile && !isCurrentUser ? '1px solid rgba(0,0,0,0.05)' : 'none',
+          position: 'relative',
+          wordBreak: 'break-word',
+          minWidth: '60px',
+          backdropFilter: 'blur(10px)',
+        }}>
+          {/* Message content */}
+          <div style={{ 
+            fontSize: '15px', 
+            lineHeight: '1.5',
+            marginBottom: '4px',
+          }}>
+            {message.content}
+          </div>
+
+          {/* Timestamp and status */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '4px',
+            marginTop: '2px',
+          }}>
+            <span style={{
+              fontSize: '11px',
+              opacity: 0.8,
+              fontWeight: '500',
+            }}>
+              {message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              }) : ''}
+            </span>
+            
+            {/* Seen status for current user's messages */}
+            {isCurrentUser && (
+              <SeenStatus 
+                seenBy={message.seenBy} 
+                users={users} 
+                currentUser={currentUser}
+                isCurrentUser={isCurrentUser}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Avatar for sent messages */}
+        {isCurrentUser && (
+          <UserAvatar 
+            user={currentUser} 
+            size={32}
+            isOnline={true}
+            showStatus={false}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Enhanced Media Message Component
+const MediaMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
+  const messageRef = useRef(null);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && !isCurrentUser) {
+          onSeen(message.id);
+        }
+      },
+      { threshold: 0.5 }
+    );
+
+    if (messageRef.current) {
+      observer.observe(messageRef.current);
+    }
+
+    return () => {
+      if (messageRef.current) {
+        observer.unobserve(messageRef.current);
+      }
+    };
+  }, [message.id, isCurrentUser, onSeen]);
+
+  return (
+    <div ref={messageRef} style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: isCurrentUser ? 'flex-end' : 'flex-start',
+      marginBottom: '16px',
+      maxWidth: isMobile ? '90%' : '70%',
+      alignSelf: isCurrentUser ? 'flex-end' : 'flex-start',
+    }}>
+      {/* Sender name for received messages */}
+      {!isCurrentUser && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          marginBottom: '4px',
+          paddingLeft: '12px',
+        }}>
+          <span style={{
+            fontSize: '12px',
+            fontWeight: '600',
+            color: isMobile ? '#667eea' : '#a0aec0',
+            textTransform: 'capitalize',
+          }}>
+            {message.senderName || message.sender}
+          </span>
+        </div>
+      )}
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        gap: '8px',
+        flexDirection: isCurrentUser ? 'row-reverse' : 'row',
+      }}>
+        {/* Avatar for received messages */}
+        {!isCurrentUser && (
+          <UserAvatar 
+            user={{ displayName: message.senderName, username: message.sender }} 
+            size={32}
+            isOnline={true}
+            showStatus={false}
+          />
+        )}
+
+        {/* Media Container */}
+        <div style={{
+          background: isCurrentUser 
+            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' 
+            : isMobile 
+            ? '#ffffff' 
+            : 'rgba(255,255,255,0.1)',
+          padding: '12px',
+          borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
+          boxShadow: isCurrentUser 
+            ? '0 4px 15px rgba(102, 126, 234, 0.3)' 
+            : isMobile 
+            ? '0 2px 12px rgba(0,0,0,0.1)' 
+            : '0 4px 15px rgba(0,0,0,0.2)',
+          border: isMobile && !isCurrentUser ? '1px solid rgba(0,0,0,0.05)' : 'none',
+          backdropFilter: 'blur(10px)',
+          maxWidth: isMobile ? '280px' : '320px',
+        }}>
+          {message.fileType === 'image' ? (
+            <div style={{ position: 'relative' }}>
+              {isLoading && (
+                <div style={{
+                  width: '250px',
+                  height: '250px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(0,0,0,0.1)',
+                  borderRadius: '12px',
+                }}>
+                  <div className="typing-dots">
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                  </div>
+                </div>
+              )}
+              <img 
+                src={message.content} 
+                alt="Shared" 
+                style={{
+                  width: '250px',
+                  height: '250px',
+                  objectFit: 'cover',
+                  borderRadius: '12px',
+                  display: isLoading ? 'none' : 'block',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                }}
+                onLoad={() => setIsLoading(false)}
+                onError={() => {
+                  setIsLoading(false);
+                  setHasError(true);
+                }}
+              />
+              {hasError && (
+                <div style={{
+                  width: '250px',
+                  height: '250px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isCurrentUser ? 'rgba(255,255,255,0.1)' : '#f7fafc',
+                  borderRadius: '12px',
+                  color: isCurrentUser ? 'rgba(255,255,255,0.7)' : '#718096',
+                }}>
+                  <Image size={48} />
+                  <div style={{ marginTop: '8px', fontSize: '14px' }}>Failed to load image</div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              {isLoading && (
+                <div style={{
+                  width: '250px',
+                  height: '250px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'rgba(0,0,0,0.1)',
+                  borderRadius: '12px',
+                }}>
+                  <div className="typing-dots">
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                    <div className="typing-dot"></div>
+                  </div>
+                </div>
+              )}
+              <video 
+                controls
+                style={{
+                  width: '250px',
+                  height: '250px',
+                  objectFit: 'cover',
+                  borderRadius: '12px',
+                  display: isLoading ? 'none' : 'block',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                }}
+                onLoadedData={() => setIsLoading(false)}
+                onError={() => {
+                  setIsLoading(false);
+                  setHasError(true);
+                }}
+              >
+                <source src={message.content} type="video/mp4" />
+              </video>
+              {hasError && (
+                <div style={{
+                  width: '250px',
+                  height: '250px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: isCurrentUser ? 'rgba(255,255,255,0.1)' : '#f7fafc',
+                  borderRadius: '12px',
+                  color: isCurrentUser ? 'rgba(255,255,255,0.7)' : '#718096',
+                }}>
+                  <Video size={48} />
+                  <div style={{ marginTop: '8px', fontSize: '14px' }}>Failed to load video</div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Download link */}
+          <div style={{ marginTop: '8px' }}>
+            <a 
+              href={message.content} 
+              download 
+              style={{ 
+                color: isCurrentUser ? 'rgba(255,255,255,0.9)' : isMobile ? '#667eea' : '#a0aec0', 
+                fontSize: '12px', 
+                textDecoration: 'underline', 
+                fontWeight: '500',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {message.fileType === 'image' ? <Image size={12} /> : <Video size={12} />}
+              Download {message.fileType === 'image' ? 'Image' : 'Video'}
+            </a>
+          </div>
+
+          {/* Timestamp and status */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: '8px',
+            paddingTop: '8px',
+            borderTop: `1px solid ${isCurrentUser ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.1)'}`,
+          }}>
+            <span style={{
+              fontSize: '11px',
+              opacity: 0.8,
+              fontWeight: '500',
+            }}>
+              {message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+              }) : ''}
+            </span>
+            
+            {/* Seen status for current user's messages */}
+            {isCurrentUser && (
+              <SeenStatus 
+                seenBy={message.seenBy} 
+                users={users} 
+                currentUser={currentUser}
+                isCurrentUser={isCurrentUser}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Avatar for sent messages */}
+        {isCurrentUser && (
+          <UserAvatar 
+            user={currentUser} 
+            size={32}
+            isOnline={true}
+            showStatus={false}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Image/Video Preview Component
 const MediaPreview = ({ file, onRemove, onSend }) => {
   const [compressedFile, setCompressedFile] = useState(null);
@@ -194,24 +645,19 @@ const MediaPreview = ({ file, onRemove, onSend }) => {
       const img = new Image();
       
       img.onload = () => {
-        // Set maximum dimensions for square format
         const maxSize = 400;
         let width = img.width;
         let height = img.height;
         
-        // Calculate dimensions for square crop
         const size = Math.min(width, height, maxSize);
         canvas.width = size;
         canvas.height = size;
         
-        // Calculate crop coordinates for center
         const sx = (width - size) / 2;
         const sy = (height - size) / 2;
         
-        // Draw image cropped to square
         ctx.drawImage(img, sx, sy, size, size, 0, 0, size, size);
         
-        // Convert to compressed blob
         canvas.toBlob(
           (blob) => {
             const compressedImageFile = new File([blob], imageFile.name, {
@@ -222,7 +668,7 @@ const MediaPreview = ({ file, onRemove, onSend }) => {
             resolve();
           },
           'image/jpeg',
-          0.7 // 70% quality
+          0.7
         );
       };
       
@@ -231,7 +677,6 @@ const MediaPreview = ({ file, onRemove, onSend }) => {
   };
 
   const compressVideo = async (videoFile) => {
-    // For videos, we'll just use the original file but limit display size
     setCompressedFile(videoFile);
     return Promise.resolve();
   };
@@ -385,235 +830,6 @@ const MediaPreview = ({ file, onRemove, onSend }) => {
   );
 };
 
-// Square Media Message Component
-const MediaMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
-  const messageRef = useRef(null);
-
-  // Track when message becomes visible
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !isCurrentUser) {
-          // Mark message as seen
-          onSeen(message.id);
-        }
-      },
-      { threshold: 0.5 }
-    );
-
-    if (messageRef.current) {
-      observer.observe(messageRef.current);
-    }
-
-    return () => {
-      if (messageRef.current) {
-        observer.unobserve(messageRef.current);
-      }
-    };
-  }, [message.id, isCurrentUser, onSeen]);
-
-  return (
-    <div ref={messageRef} style={{
-      maxWidth: isMobile ? '250px' : '300px',
-      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
-      padding: '12px',
-      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
-      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
-    }}>
-      {message.fileType === 'image' ? (
-        <div style={{ position: 'relative' }}>
-          {isLoading && (
-            <div style={{
-              width: '250px',
-              height: '250px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0,0,0,0.1)',
-              borderRadius: '12px',
-            }}>
-              <div className="typing-dots">
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-              </div>
-            </div>
-          )}
-          <img 
-            src={message.content} 
-            alt="Shared" 
-            style={{
-              width: '250px',
-              height: '250px',
-              objectFit: 'cover',
-              borderRadius: '12px',
-              display: isLoading ? 'none' : 'block',
-            }}
-            onLoad={() => setIsLoading(false)}
-            onError={() => {
-              setIsLoading(false);
-              setHasError(true);
-            }}
-          />
-          {hasError && (
-            <div style={{
-              width: '250px',
-              height: '250px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: '#f7fafc',
-              borderRadius: '12px',
-              color: '#718096',
-            }}>
-              <Image size={48} />
-              <div style={{ marginTop: '8px' }}>Failed to load image</div>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div style={{ position: 'relative' }}>
-          {isLoading && (
-            <div style={{
-              width: '250px',
-              height: '250px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(0,0,0,0.1)',
-              borderRadius: '12px',
-            }}>
-              <div className="typing-dots">
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-                <div className="typing-dot"></div>
-              </div>
-            </div>
-          )}
-          <video 
-            controls
-            style={{
-              width: '250px',
-              height: '250px',
-              objectFit: 'cover',
-              borderRadius: '12px',
-              display: isLoading ? 'none' : 'block',
-            }}
-            onLoadedData={() => setIsLoading(false)}
-            onError={() => {
-              setIsLoading(false);
-              setHasError(true);
-            }}
-          >
-            <source src={message.content} type="video/mp4" />
-          </video>
-          {hasError && (
-            <div style={{
-              width: '250px',
-              height: '250px',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: '#f7fafc',
-              borderRadius: '12px',
-              color: '#718096',
-            }}>
-              <Video size={48} />
-              <div style={{ marginTop: '8px' }}>Failed to load video</div>
-            </div>
-          )}
-        </div>
-      )}
-      
-      <div style={{ marginTop: '8px' }}>
-        <a 
-          href={message.content} 
-          download 
-          style={{ 
-            color: isCurrentUser ? '#fff' : isMobile ? '#667eea' : '#a0aec0', 
-            fontSize: '12px', 
-            textDecoration: 'underline', 
-            fontWeight: '500',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px'
-          }}
-        >
-          {message.fileType === 'image' ? <Image size={12} /> : <Video size={12} />}
-          Download {message.fileType === 'image' ? 'Image' : 'Video'}
-        </a>
-      </div>
-
-      {/* Seen Status for Media Messages */}
-      <SeenStatus 
-        seenBy={message.seenBy} 
-        users={users} 
-        currentUser={currentUser}
-        isCurrentUser={isCurrentUser}
-      />
-    </div>
-  );
-};
-
-// Text Message Component
-const TextMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onSeen }) => {
-  const messageRef = useRef(null);
-
-  // Track when message becomes visible
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting && !isCurrentUser) {
-          // Mark message as seen
-          onSeen(message.id);
-        }
-      },
-      { threshold: 0.5 }
-    );
-
-    if (messageRef.current) {
-      observer.observe(messageRef.current);
-    }
-
-    return () => {
-      if (messageRef.current) {
-        observer.unobserve(messageRef.current);
-      }
-    };
-  }, [message.id, isCurrentUser, onSeen]);
-
-  return (
-    <div ref={messageRef} style={{
-      background: isCurrentUser ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : isMobile ? '#ffffff' : 'rgba(255,255,255,0.08)',
-      color: isCurrentUser ? '#fff' : isMobile ? '#2d3748' : '#e2e8f0',
-      padding: '12px 16px',
-      borderRadius: isCurrentUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-      boxShadow: isCurrentUser ? '0 4px 12px rgba(102, 126, 234, 0.3)' : isMobile ? '0 2px 8px rgba(0,0,0,0.08)' : '0 4px 12px rgba(0,0,0,0.2)',
-      border: isMobile && !isCurrentUser ? '1px solid #e2e8f0' : 'none',
-      wordBreak: 'break-word',
-      maxWidth: isMobile ? '85%' : '60%',
-    }}>
-      <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '6px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-        {message.timestamp ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-      </div>
-      <div style={{ fontSize: '15px', lineHeight: '1.5' }}>{message.content}</div>
-      
-      {/* Seen Status for Text Messages */}
-      <SeenStatus 
-        seenBy={message.seenBy} 
-        users={users} 
-        currentUser={currentUser}
-        isCurrentUser={isCurrentUser}
-      />
-    </div>
-  );
-};
-
 // Push Notification Component
 const PushNotification = ({ notification, onClose, isMobile }) => {
   useEffect(() => {
@@ -763,7 +979,6 @@ const ChatApp = () => {
     const handleActivity = () => {
       setIsUserActive(true);
       
-      // Send activity status to server
       if (ws.current && ws.current.readyState === WebSocket.OPEN) {
         ws.current.send(JSON.stringify({
           type: 'userActivity',
@@ -771,32 +986,27 @@ const ChatApp = () => {
         }));
       }
       
-      // Clear existing timeout
       if (activityTimeoutRef.current) {
         clearTimeout(activityTimeoutRef.current);
       }
       
-      // Set new timeout for inactivity
       activityTimeoutRef.current = setTimeout(() => {
         setIsUserActive(false);
         
-        // Send inactivity status to server
         if (ws.current && ws.current.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify({
             type: 'userActivity',
             isActive: false
           }));
         }
-      }, 30000); // 30 seconds of inactivity
+      }, 30000);
     };
 
-    // Add event listeners for user activity
     const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'];
     events.forEach(event => {
       document.addEventListener(event, handleActivity, true);
     });
 
-    // Initial activity
     handleActivity();
 
     return () => {
@@ -830,7 +1040,6 @@ const ChatApp = () => {
     
     setNotifications(prev => [...prev, newNotification]);
     
-    // Show browser notification if user is not active
     if (!isUserActive) {
       showBrowserNotification(notification);
     }
@@ -2005,13 +2214,13 @@ const ChatApp = () => {
         <div
           style={{
             flexGrow: 1,
-            padding: isMobile ? '20px 12px' : '24px 30px',
+            padding: isMobile ? '16px 12px' : '20px 30px',
             overflowY: 'auto',
             overflowX: 'hidden',
             display: 'flex',
             flexDirection: 'column',
-            gap: '16px',
             background: isMobile ? '#f7fafc' : 'transparent',
+            position: 'relative',
           }}
         >
           {messages.length === 0 ? (
@@ -2030,95 +2239,29 @@ const ChatApp = () => {
             </div>
           ) : (
             messages.map((msg, index) => {
-              // Fallback key when id missing
               const key = msg?.id ?? `${index}-${msg?.timestamp ?? ''}`;
               const isCurrentUser = msg.sender === user?.username;
               
-              return (
-                <div
+              return msg.isFile ? (
+                <MediaMessage 
                   key={key}
-                  style={{
-                    display: 'flex',
-                    justifyContent: isCurrentUser ? 'flex-end' : 'flex-start',
-                    alignItems: 'flex-end',
-                    gap: '8px',
-                  }}
-                >
-                  {!isCurrentUser && (
-                    <div style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      flexShrink: 0,
-                    }}>
-                      {(msg.senderName || msg.sender || 'U').charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                  
-                  <div
-                    style={{
-                      maxWidth: isMobile ? '85%' : '60%',
-                    }}
-                  >
-                    {!isCurrentUser && (
-                      <div style={{ 
-                        fontSize: '12px', 
-                        opacity: 0.8, 
-                        marginBottom: '4px', 
-                        fontWeight: '600',
-                        color: isMobile ? '#667eea' : '#a0aec0',
-                        paddingLeft: '8px'
-                      }}>
-                        {msg.senderName || msg.sender}
-                      </div>
-                    )}
-                    
-                    {msg.isFile ? (
-                      <MediaMessage 
-                        message={msg} 
-                        isCurrentUser={isCurrentUser}
-                        isMobile={isMobile}
-                        users={users}
-                        currentUser={user}
-                        onSeen={handleMessageSeen}
-                      />
-                    ) : (
-                      <TextMessage 
-                        message={msg} 
-                        isCurrentUser={isCurrentUser}
-                        isMobile={isMobile}
-                        users={users}
-                        currentUser={user}
-                        onSeen={handleMessageSeen}
-                      />
-                    )}
-                  </div>
-                  
-                  {isCurrentUser && (
-                    <div style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #48bb78 0%, #38a169 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '12px',
-                      fontWeight: 'bold',
-                      flexShrink: 0,
-                    }}>
-                      {(user.username || 'U').charAt(0).toUpperCase()}
-                    </div>
-                  )}
-                </div>
+                  message={msg} 
+                  isCurrentUser={isCurrentUser}
+                  isMobile={isMobile}
+                  users={users}
+                  currentUser={user}
+                  onSeen={handleMessageSeen}
+                />
+              ) : (
+                <TextMessage 
+                  key={key}
+                  message={msg} 
+                  isCurrentUser={isCurrentUser}
+                  isMobile={isMobile}
+                  users={users}
+                  currentUser={user}
+                  onSeen={handleMessageSeen}
+                />
               );
             })
           )}
@@ -2393,7 +2536,7 @@ const ChatApp = () => {
         .typing-dot {
           width: 6px;
           height: 6px;
-          border-radius: 50%;
+          border-radius: '50%';
           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
           animation: typingBounce 1.4s ease-in-out infinite;
         }
