@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useContext } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Send, Paperclip, Menu, X, Users, LogOut, Trash2, Circle, Clock, Wifi, WifiOff, Image, Video, Eye, Check, CheckCheck, Bell, BellOff } from 'lucide-react';
-import { AuthContext } from '../../AuthContext';
+import { AuthContext } from '../../context/AuthContext';
 
 // Enhanced Typing Indicator Component
 const TypingIndicator = ({ typingUsers, isMobile }) => {
@@ -207,7 +207,7 @@ const TextMessage = ({ message, isCurrentUser, isMobile, users, currentUser, onS
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !isCurrentUser) {
+        if (entry.isIntersecting && !isCurrentUser && message.id) {
           onSeen(message.id);
         }
       },
@@ -354,7 +354,7 @@ const MediaMessage = ({ message, isCurrentUser, isMobile, users, currentUser, on
   useEffect(() => {
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting && !isCurrentUser) {
+        if (entry.isIntersecting && !isCurrentUser && message.id) {
           onSeen(message.id);
         }
       },
@@ -1197,31 +1197,33 @@ const ChatApp = () => {
       ws.current.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('📨 WebSocket message:', data);
+          console.log('📨 WebSocket message received:', data);
 
           switch (data.type) {
             case 'authSuccess':
               setRooms(data.rooms || ['general']);
               setUsers(data.users || []);
-              console.log(`✅ Loaded ${data.users.length} users, ${data.onlineCount} online`);
+              console.log(`✅ Auth success: Loaded ${data.users?.length || 0} users`);
               break;
             case 'message':
               // Append only messages for current room
-              if (!data.data.room || data.data.room === currentRoom) {
+              if (data.data && (!data.data.room || data.data.room === currentRoom)) {
                 setMessages((prev) => [...prev, data.data]);
               }
               break;
             case 'userStatusUpdate':
               setUsers(data.users || []);
-              console.log(`🔄 User status update: ${data.onlineCount} online`);
+              console.log(`🔄 User status update: ${data.onlineCount || 0} online`);
               break;
             case 'typingUpdate':
               setTypingUsers(data.typingUsers || []);
-              console.log(`⌨️ Typing update: ${data.typingUsers.join(', ')}`);
+              console.log(`⌨️ Typing update: ${data.typingUsers?.join(', ') || 'none'}`);
               break;
             case 'messageSeen':
-              updateMessageSeenStatus(data.messageId, data.seenBy);
-              console.log(`👀 Message ${data.messageId} seen by ${data.seenByUser}`);
+              if (data.messageId && data.seenBy) {
+                updateMessageSeenStatus(data.messageId, data.seenBy);
+                console.log(`👀 Message ${data.messageId} seen by ${data.seenByUser || 'users'}`);
+              }
               break;
             case 'clear':
               if (data.room === currentRoom) {
